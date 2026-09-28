@@ -221,35 +221,35 @@ export default function SchedulesPage() {
           <h1 className="page-title">Training Schedule</h1>
           <p className="page-subtitle">{schedules.filter(s => s.status === 'planned').length} planned sessions</p>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => navigate('/emails')}>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={() => navigate('/emails')} className="flex-1 sm:flex-none">
             <Mail className="h-4 w-4 mr-1 text-primary" /> Send Alerts
           </Button>
-          <Button variant="outline" size="sm" onClick={handleExport}>
+          <Button variant="outline" size="sm" onClick={handleExport} className="flex-1 sm:flex-none">
             <Download className="h-4 w-4" /> Export
           </Button>
-          <Button size="sm" onClick={openCreate}>
+          <Button size="sm" onClick={openCreate} className="w-full sm:w-auto">
             <Plus className="h-4 w-4" /> Schedule Training
           </Button>
         </div>
       </div>
 
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList>
+        <TabsList className="w-full sm:w-auto grid grid-cols-2 sm:inline-flex">
           <TabsTrigger value="list">List View</TabsTrigger>
           <TabsTrigger value="calendar">Calendar View</TabsTrigger>
         </TabsList>
 
         <TabsContent value="list">
           <Card>
-            <CardContent className="pt-6">
-              <div className="flex flex-wrap items-center gap-3 mb-6">
-                <div className="relative flex-1 max-w-sm">
+            <CardContent className="p-3.5 sm:p-6">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-4 sm:mb-6">
+                <div className="relative flex-1 w-full sm:max-w-sm">
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input placeholder="Search schedules…" value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
                 </div>
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-40">
+                  <SelectTrigger className="w-full sm:w-40">
                     <SelectValue placeholder="Status" />
                   </SelectTrigger>
                   <SelectContent>
@@ -273,8 +273,8 @@ export default function SchedulesPage() {
                   <Button className="mt-4" size="sm" onClick={openCreate}><Plus className="h-4 w-4" /> Schedule Training</Button>
                 </div>
               ) : (
-                <div className="overflow-x-auto w-full">
-                  <table className="data-table">
+                <div className="overflow-x-auto w-full -mx-3.5 sm:mx-0 px-3.5 sm:px-0">
+                  <table className="data-table min-w-[650px]">
                     <thead>
                       <tr>
                         <th>Training</th>
@@ -358,7 +358,7 @@ export default function SchedulesPage() {
               )}
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
               <div className="space-y-1.5">
                 <Label>Date <span className="text-red-500">*</span></Label>
                 <Input type="date" value={form.scheduled_date} onChange={e => setForm(f => ({ ...f, scheduled_date: e.target.value }))} />

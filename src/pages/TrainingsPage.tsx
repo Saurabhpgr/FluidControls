@@ -123,20 +123,20 @@ export default function TrainingsPage() {
           <h1 className="page-title">Training Master</h1>
           <p className="page-subtitle">{trainings.filter(t => t.is_active).length} active training programs</p>
         </div>
-        <div className="flex gap-3">
-          <Button variant="outline" size="sm" onClick={handleExport}>
+        <div className="flex flex-wrap gap-2 sm:gap-3">
+          <Button variant="outline" size="sm" onClick={handleExport} className="flex-1 sm:flex-none">
             <Download className="h-4 w-4" /> Export
           </Button>
-          <Button size="sm" onClick={openCreate}>
+          <Button size="sm" onClick={openCreate} className="flex-1 sm:flex-none">
             <Plus className="h-4 w-4" /> Add New Training
           </Button>
         </div>
       </div>
 
       <Card>
-        <CardContent className="pt-6">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="relative flex-1 max-w-sm">
+        <CardContent className="p-3.5 sm:p-6">
+          <div className="flex items-center gap-3 mb-4 sm:mb-6">
+            <div className="relative flex-1 w-full sm:max-w-sm">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input placeholder="Search trainings…" value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
             </div>
@@ -154,8 +154,8 @@ export default function TrainingsPage() {
               <Button className="mt-4" size="sm" onClick={openCreate}><Plus className="h-4 w-4" /> Add Training</Button>
             </div>
           ) : (
-            <div className="overflow-x-auto w-full">
-              <table className="data-table">
+            <div className="overflow-x-auto w-full -mx-3.5 sm:mx-0 px-3.5 sm:px-0">
+              <table className="data-table min-w-[600px]">
                 <thead>
                   <tr>
                     <th>Training Name</th>

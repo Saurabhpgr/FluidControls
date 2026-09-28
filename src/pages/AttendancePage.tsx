@@ -3,6 +3,7 @@ import { Search, ClipboardCheck, Save, Download, CheckCircle, XCircle } from 'lu
 import { supabase } from '@/lib/supabase'
 import { logAudit } from '@/lib/audit'
 import { exportToExcel } from '@/lib/excel'
+import { exportAttendanceSheetPdf } from '@/lib/pdf'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -160,17 +161,39 @@ export default function AttendancePage() {
     }
   }
 
-  const handleExport = () => {
+  const handleExportExcel = () => {
     if (!selectedSchedule) return
     exportToExcel(
       attendance as unknown as Record<string, unknown>[],
       [
         { key: 'employee_code', label: 'Employee Code' },
         { key: 'employee_name', label: 'Name' },
+        { key: 'department', label: 'Department' },
+        { key: 'designation', label: 'Designation' },
         { key: 'attendance_status', label: 'Status' },
       ],
       `attendance_${formatDate(selectedSchedule.scheduled_date).replace(/\s/g, '_')}`
     )
+    toast.success('Exported to Excel')
+  }
+
+  const handleExportPdf = () => {
+    if (!selectedSchedule) return
+    const trName = (selectedSchedule as unknown as { trainings: { name: string } })?.trainings?.name || 'Training Session'
+    exportAttendanceSheetPdf({
+      trainingName: trName,
+      trainerName: selectedSchedule.trainer_name,
+      scheduledDate: selectedSchedule.scheduled_date,
+      groupType: selectedSchedule.group_type,
+      employees: attendance.map(a => ({
+        code: a.employee_code || '',
+        name: a.employee_name || '',
+        department: a.department || '',
+        designation: a.designation || '',
+        status: a.attendance_status,
+      })),
+    })
+    toast.success('Printable Attendance PDF downloaded')
   }
 
   const presentCount = attendance.filter(a => a.attendance_status === 'present').length
@@ -207,47 +230,64 @@ export default function AttendancePage() {
       </Card>
 
       {selectedSchedule && (
-        <Card>
+        <Card className="overflow-hidden">
           <CardHeader className="pb-4">
-            <div className="flex items-center justify-between">
-              <div>
-                <CardTitle>{(selectedSchedule as unknown as { trainings: { name: string } }).trainings?.name}</CardTitle>
-                <p className="text-sm text-muted-foreground mt-1">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <CardTitle className="text-base sm:text-lg truncate">
+                  {(selectedSchedule as unknown as { trainings: { name: string } }).trainings?.name}
+                </CardTitle>
+                <p className="text-xs sm:text-sm text-muted-foreground mt-0.5">
                   {formatDate(selectedSchedule.scheduled_date)} · Trainer: {selectedSchedule.trainer_name}
                 </p>
               </div>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={handleExport} disabled={attendance.length === 0}>
-                  <Download className="h-4 w-4" /> Export
+              <div className="flex items-center gap-2 flex-wrap flex-shrink-0">
+                <Button variant="outline" size="sm" onClick={handleExportExcel} disabled={attendance.length === 0} className="text-xs">
+                  <Download className="h-3.5 w-3.5 mr-1" /> Excel
                 </Button>
-                <Button size="sm" onClick={handleSave} disabled={saving || attendance.length === 0}>
-                  <Save className="h-4 w-4" /> {saving ? 'Saving…' : 'Save Attendance'}
+                <Button variant="outline" size="sm" onClick={handleExportPdf} disabled={attendance.length === 0} className="text-xs border-blue-300 text-blue-700 hover:bg-blue-50">
+                  <Download className="h-3.5 w-3.5 mr-1 text-blue-600" /> Printable PDF
+                </Button>
+                <Button size="sm" onClick={handleSave} disabled={saving || attendance.length === 0} className="text-xs">
+                  <Save className="h-3.5 w-3.5 mr-1" /> {saving ? 'Saving…' : 'Save Attendance'}
                 </Button>
               </div>
             </div>
 
             {attendance.length > 0 && (
-              <div className="flex items-center gap-6 mt-4">
-                <div className="flex items-center gap-2 text-sm">
-                  <div className="h-3 w-3 rounded-full bg-emerald-500" />
-                  <span className="font-medium text-emerald-700">{presentCount} Present</span>
-                </div>
-                <div className="flex items-center gap-2 text-sm">
-                  <div className="h-3 w-3 rounded-full bg-red-500" />
-                  <span className="font-medium text-red-700">{absentCount} Absent</span>
-                </div>
-                {notMarkedCount > 0 && (
-                  <div className="flex items-center gap-2 text-sm">
-                    <div className="h-3 w-3 rounded-full bg-gray-400" />
-                    <span className="font-medium text-muted-foreground">{notMarkedCount} Not Marked</span>
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mt-4 pt-3 border-t">
+                <div className="flex flex-wrap items-center gap-3 sm:gap-6 text-xs sm:text-sm">
+                  <div className="flex items-center gap-1.5 font-medium text-emerald-700">
+                    <div className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                    <span>{presentCount} Present</span>
                   </div>
-                )}
-                <div className="ml-auto flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => markAll('present')} className="text-emerald-700 border-emerald-300 hover:bg-emerald-50">
-                    <CheckCircle className="h-3.5 w-3.5" /> Mark All Present
+                  <div className="flex items-center gap-1.5 font-medium text-red-700">
+                    <div className="h-2.5 w-2.5 rounded-full bg-red-500" />
+                    <span>{absentCount} Absent</span>
+                  </div>
+                  {notMarkedCount > 0 && (
+                    <div className="flex items-center gap-1.5 text-muted-foreground">
+                      <div className="h-2.5 w-2.5 rounded-full bg-gray-400" />
+                      <span>{notMarkedCount} Not Marked</span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 flex-wrap w-full md:w-auto">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => markAll('present')}
+                    className="flex-1 sm:flex-none text-xs text-emerald-700 border-emerald-300 hover:bg-emerald-50 h-8"
+                  >
+                    <CheckCircle className="h-3.5 w-3.5 mr-1" /> Mark All Present
                   </Button>
-                  <Button variant="outline" size="sm" onClick={() => markAll('absent')} className="text-red-700 border-red-300 hover:bg-red-50">
-                    <XCircle className="h-3.5 w-3.5" /> Mark All Absent
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => markAll('absent')}
+                    className="flex-1 sm:flex-none text-xs text-red-700 border-red-300 hover:bg-red-50 h-8"
+                  >
+                    <XCircle className="h-3.5 w-3.5 mr-1" /> Mark All Absent
                   </Button>
                 </div>
               </div>
@@ -269,7 +309,7 @@ export default function AttendancePage() {
                   <div
                     key={a.employee_id}
                     onClick={() => toggleStatus(a.employee_id)}
-                    className={`flex items-center gap-4 p-4 rounded-xl cursor-pointer border-2 transition-all duration-200 ${
+                    className={`flex items-center justify-between gap-3 p-3 sm:p-4 rounded-xl cursor-pointer border-2 transition-all duration-200 min-w-0 ${
                       a.attendance_status === 'present'
                         ? 'bg-emerald-50 border-emerald-300 hover:bg-emerald-100'
                         : a.attendance_status === 'absent'
@@ -277,25 +317,27 @@ export default function AttendancePage() {
                         : 'bg-muted/30 border-muted hover:bg-muted/60 border-dashed'
                     }`}
                   >
-                    <div className="h-10 w-10 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
-                      <span className="text-sm font-bold text-muted-foreground">
-                        {a.employee_name[0]}
-                      </span>
+                    <div className="flex items-center gap-3 min-w-0 flex-1">
+                      <div className="h-8 w-8 sm:h-10 sm:w-10 rounded-full bg-muted flex items-center justify-center flex-shrink-0">
+                        <span className="text-xs sm:text-sm font-bold text-muted-foreground">
+                          {a.employee_name[0]}
+                        </span>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-xs sm:text-sm truncate">{a.employee_name}</p>
+                        <p className="text-[11px] sm:text-xs text-muted-foreground truncate">{a.employee_code}</p>
+                      </div>
                     </div>
-                    <div className="flex-1">
-                      <p className="font-medium">{a.employee_name}</p>
-                      <p className="text-xs text-muted-foreground">{a.employee_code}</p>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className={`status-badge ${getStatusColor(a.attendance_status)}`}>
+                    <div className="flex items-center gap-2 sm:gap-3 flex-shrink-0">
+                      <span className={`status-badge text-[10px] sm:text-xs px-2 py-0.5 ${getStatusColor(a.attendance_status)}`}>
                         {a.attendance_status === 'not_marked' ? 'Not Marked' : a.attendance_status}
                       </span>
                       {a.attendance_status === 'present' ? (
-                        <CheckCircle className="h-5 w-5 text-emerald-600" />
+                        <CheckCircle className="h-4 w-4 sm:h-5 sm:w-5 text-emerald-600 flex-shrink-0" />
                       ) : a.attendance_status === 'absent' ? (
-                        <XCircle className="h-5 w-5 text-red-600" />
+                        <XCircle className="h-4 w-4 sm:h-5 sm:w-5 text-red-600 flex-shrink-0" />
                       ) : (
-                        <div className="h-5 w-5 rounded-full border-2 border-dashed border-muted-foreground" />
+                        <div className="h-4 w-4 sm:h-5 sm:w-5 rounded-full border-2 border-dashed border-muted-foreground flex-shrink-0" />
                       )}
                     </div>
                   </div>

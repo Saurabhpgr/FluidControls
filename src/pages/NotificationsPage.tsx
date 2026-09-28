@@ -2,14 +2,14 @@ import React, { useState, useEffect } from 'react'
 import { 
   Mail, Send, Copy, ExternalLink, Users, BookOpen, AlertTriangle, 
   CheckCircle2, Clock, Calendar, Check, FileQuestion, FolderOpen,
-  Sparkles, MessageSquare, Filter, ShieldAlert, History
+  Sparkles, MessageSquare, Filter, ShieldAlert, Search, Eye
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Textarea } from '@/components/ui/textarea'
@@ -64,7 +64,7 @@ const formatQuizInfo = (quiz?: Quiz | null, _trainingName?: string) => {
 const TEMPLATES: EmailTemplateConfig[] = [
   {
     id: 'invitation',
-    name: 'Training Session Invitation',
+    name: 'Training Invitation',
     subject: '[FluidControl] Training Invitation: {Training_Name}',
     icon: Calendar,
     badgeColor: 'bg-blue-100 text-blue-800',
@@ -94,7 +94,7 @@ hr@fluidcontrol.com`,
   },
   {
     id: 'quiz_link',
-    name: 'Mandatory Quiz & Assessment Link',
+    name: 'Mandatory Quiz Link',
     subject: '[Action Required] Assessment for {Training_Name}',
     icon: FileQuestion,
     badgeColor: 'bg-amber-100 text-amber-800',
@@ -118,7 +118,7 @@ hr@fluidcontrol.com`,
   },
   {
     id: 'materials',
-    name: 'Training Materials & Study Resources',
+    name: 'Study Materials',
     subject: '[Study Resources] Reference Materials for {Training_Name}',
     icon: FolderOpen,
     badgeColor: 'bg-emerald-100 text-emerald-800',
@@ -141,7 +141,7 @@ hr@fluidcontrol.com`,
   },
   {
     id: 'reminder',
-    name: 'Session Reminder & Preparation',
+    name: 'Session Reminder',
     subject: '[Reminder] Tomorrow: {Training_Name}',
     icon: Clock,
     badgeColor: 'bg-purple-100 text-purple-800',
@@ -165,7 +165,7 @@ hr@fluidcontrol.com`,
   },
   {
     id: 'escalation',
-    name: 'Overdue Compliance Escalation',
+    name: 'Overdue Escalation',
     subject: '[URGENT ESCALATION] Overdue Training: {Training_Name}',
     icon: ShieldAlert,
     badgeColor: 'bg-red-100 text-red-800',
@@ -190,7 +190,6 @@ hr@fluidcontrol.com`,
   },
 ]
 
-// RFC 6068 Compliant Mail Dispatch Helper for Native Mail Clients (Outlook, Apple Mail, Windows Mail)
 function buildMailtoUrl(to: string, bcc: string, subject: string, body: string): string {
   const params: string[] = []
   if (bcc) {
@@ -212,7 +211,7 @@ function dispatchMailto(to: string, bcc: string, subject: string, body: string) 
   const url = buildMailtoUrl(to, bcc, subject, body)
   try {
     window.location.href = url
-  } catch (e) {
+  } catch {
     const link = document.createElement('a')
     link.href = url
     link.target = '_self'
@@ -221,7 +220,6 @@ function dispatchMailto(to: string, bcc: string, subject: string, body: string) 
     document.body.removeChild(link)
   }
 }
-
 
 export default function NotificationsPage() {
   const [schedules, setSchedules] = useState<TrainingSchedule[]>([])
@@ -232,6 +230,7 @@ export default function NotificationsPage() {
   const [loading, setLoading] = useState(true)
   const [selectedTemplate, setSelectedTemplate] = useState<EmailTemplateType>('invitation')
   const [audienceFilter, setAudienceFilter] = useState<string>('all')
+  const [search, setSearch] = useState<string>('')
 
   // Preview Dialog State
   const [previewOpen, setPreviewOpen] = useState(false)
@@ -276,7 +275,6 @@ export default function NotificationsPage() {
     }
 
     try {
-      // 1. Fetch Schedule Employees or resolve based on group type
       const [{ data: seRows }, { data: allEmps }, { data: attRows }, { data: quizData }, { data: matData }, { data: histRows }] = await Promise.all([
         supabase.from('schedule_employees').select('employee_id').eq('schedule_id', scheduleId),
         supabase.from('employees').select('*, departments(name)').eq('is_active', true),
@@ -301,7 +299,6 @@ export default function NotificationsPage() {
         targetEmps = empsList.filter(e => e.department_id === sched.department_id)
       }
 
-      // Combine with attendance and history info
       const mapped: EnrolledEmployeeInfo[] = targetEmps.map(emp => {
         const att = attRows?.find(a => a.employee_id === emp.id)
         const hist = histRows?.find(h => h.employee_id === emp.id)
@@ -326,8 +323,14 @@ export default function NotificationsPage() {
   const currentTrainingName = (currentSchedule as unknown as { trainings: { name: string } })?.trainings?.name || 'Training'
   const currentTemplate = TEMPLATES.find(t => t.id === selectedTemplate) || TEMPLATES[0]
 
-  // Filter enrolled employees based on audience selector
   const filteredEmployees = enrolledEmployees.filter(item => {
+    const matchSearch = !search || 
+      item.employee.name.toLowerCase().includes(search.toLowerCase()) ||
+      item.employee.employee_code.toLowerCase().includes(search.toLowerCase()) ||
+      item.employee.email.toLowerCase().includes(search.toLowerCase())
+    
+    if (!matchSearch) return false
+
     if (audienceFilter === 'all') return true
     if (audienceFilter === 'pending_attendance') return item.attendanceStatus === 'not_marked' || item.attendanceStatus === 'absent'
     if (audienceFilter === 'present_only') return item.attendanceStatus === 'present'
@@ -335,7 +338,6 @@ export default function NotificationsPage() {
     return true
   })
 
-  // Format message for a specific employee with real links
   const renderMessageForEmployee = (emp: Employee) => {
     const subject = currentTemplate.subject.replace('{Training_Name}', currentTrainingName)
     const body = currentTemplate.generateBody({
@@ -349,7 +351,6 @@ export default function NotificationsPage() {
     return { subject, body }
   }
 
-  // Mass BCC: Copy all emails to clipboard
   const handleCopyAllEmails = () => {
     const emails = filteredEmployees.map(e => e.employee.email).filter(Boolean)
     if (emails.length === 0) {
@@ -360,7 +361,6 @@ export default function NotificationsPage() {
     toast.success(`Copied ${emails.length} recipient email(s) for Mass BCC!`)
   }
 
-  // Open default mail client with mass BCC
   const handleOpenMassBcc = () => {
     const emails = filteredEmployees.map(e => e.employee.email).filter(Boolean)
     if (emails.length === 0) {
@@ -372,14 +372,10 @@ export default function NotificationsPage() {
     toast.success(`Redirecting to Mail client with ${emails.length} BCC recipient(s)...`)
   }
 
-  // Individual dispatch to native Mail App
   const handleSendIndividual = (emp: Employee) => {
     const { subject, body } = renderMessageForEmployee(emp)
-    
-    // Synchronously trigger mailto so browser does not block external protocol prompt
     dispatchMailto(emp.email, '', subject, body)
 
-    // Log to notifications table
     supabase.from('notifications').insert({
       type: selectedTemplate === 'escalation' ? 'overdue' : selectedTemplate === 'invitation' ? 'new_training_assigned' : 'reminder',
       schedule_id: selectedScheduleId,
@@ -387,14 +383,11 @@ export default function NotificationsPage() {
       message: `${currentTemplate.name} dispatched to ${emp.name} (${emp.email})`,
       sent_at: new Date().toISOString(),
       status: 'sent',
-    }).then(() => {}).catch(err => {
-      console.warn('Failed to log notification', err)
-    })
+    }).then(() => {}).catch(() => {})
 
     toast.success(`Redirecting to Mail app for ${emp.name}`)
   }
 
-  // Open Preview Modal
   const openPreview = (emp?: Employee) => {
     const targetEmp = emp || filteredEmployees[0]?.employee || { name: '[Employee Name]', email: 'employee@fluidcontrol.com' } as Employee
     setPreviewEmployee(targetEmp)
@@ -432,259 +425,196 @@ export default function NotificationsPage() {
 
   return (
     <div className="space-y-6 animate-fade-in">
-      {/* Page Header */}
+      {/* Clean Page Header matching Employees & Training Master pages */}
       <div className="page-header">
         <div>
-          <h1 className="page-title flex items-center gap-2">
-            <Mail className="h-6 w-6 text-primary" /> Emails & Alerts
-          </h1>
-          <p className="page-subtitle">
-            Targeted notifications, schedule invitations, assessment links, and escalations for enrolled training participants
-          </p>
+          <h1 className="page-title">Emails & Alerts</h1>
+          <p className="page-subtitle">Targeted notifications, schedule invitations, assessment links, and escalations</p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleCopyAllEmails}
+            title="Copy All Participant Emails"
+            className="flex-1 sm:flex-none border-slate-300 hover:bg-slate-100"
+          >
+            <Copy className="h-4 w-4 text-slate-600 mr-1.5" /> Copy Emails ({filteredEmployees.length})
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleOpenMassBcc}
+            title="Open Mass BCC in Default Mail Client"
+            className="flex-1 sm:flex-none border-slate-300 hover:bg-slate-100"
+          >
+            <ExternalLink className="h-4 w-4 text-blue-600 mr-1.5" /> Open Mass BCC
+          </Button>
+          <Button 
+            size="sm" 
+            onClick={() => openPreview()} 
+            className="w-full sm:w-auto"
+          >
+            <MessageSquare className="h-4 w-4 mr-1.5" /> Preview Template
+          </Button>
         </div>
       </div>
 
-      {/* Training Session Selector & Overview */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <Card className="lg:col-span-2 shadow-sm border">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base flex items-center gap-2">
-              <BookOpen className="h-4 w-4 text-primary" /> Select Targeted Training Session
-            </CardTitle>
-            <CardDescription className="text-xs">
-              Only employees enrolled in this specific training session will be targeted.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <Label>Training Schedule</Label>
-                <Select value={selectedScheduleId} onValueChange={setSelectedScheduleId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select a training schedule…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {schedules.map(s => {
-                      const trName = (s as unknown as { trainings: { name: string } })?.trainings?.name || 'Training'
-                      return (
-                        <SelectItem key={s.id} value={s.id}>
-                          {trName} — {formatDate(s.scheduled_date)} ({s.status})
-                        </SelectItem>
-                      )
-                    })}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label>Audience Filter</Label>
-                <Select value={audienceFilter} onValueChange={setAudienceFilter}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Enrolled Employees ({enrolledEmployees.length})</SelectItem>
-                    <SelectItem value="pending_attendance">Pending Attendance / Absent</SelectItem>
-                    <SelectItem value="present_only">Present Attendees Only</SelectItem>
-                    <SelectItem value="overdue">Pending / Overdue Compliance</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+      {/* Main Clean Card Container matching Employees & Trainings */}
+      <Card>
+        <CardContent className="p-4 sm:p-6">
+          {/* Top Filters & Controls Bar */}
+          <div className="flex flex-col lg:flex-row items-stretch lg:items-center gap-3 mb-4 sm:mb-6">
+            {/* Search Input */}
+            <div className="relative flex-1 w-full lg:max-w-xs">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+              <Input
+                placeholder="Search participants…"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                className="pl-9 h-9 text-sm"
+              />
             </div>
 
-            {/* Quick Session Details Pill with actual links summary */}
-            {currentSchedule && (
-              <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
-                <div className="flex items-center gap-4">
-                  <div>
-                    <span className="text-muted-foreground block text-[10px]">TRAINER</span>
-                    <span className="font-semibold text-slate-800">{currentSchedule.trainer_name}</span>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground block text-[10px]">SCHEDULED DATE</span>
-                    <span className="font-semibold text-slate-800">{formatDate(currentSchedule.scheduled_date)}</span>
-                  </div>
-                  <div>
-                    <span className="text-muted-foreground block text-[10px]">TARGET AUDIENCE</span>
-                    <span className="font-semibold text-slate-800 capitalize">{currentSchedule.group_type}</span>
-                  </div>
+            {/* Session Selector */}
+            <div className="w-full lg:w-72">
+              <Select value={selectedScheduleId} onValueChange={setSelectedScheduleId}>
+                <SelectTrigger className="h-9 text-xs sm:text-sm">
+                  <SelectValue placeholder="Select training session" />
+                </SelectTrigger>
+                <SelectContent>
+                  {schedules.map(s => {
+                    const trName = (s as unknown as { trainings: { name: string } })?.trainings?.name || 'Training'
+                    return (
+                      <SelectItem key={s.id} value={s.id}>
+                        {trName} — {formatDate(s.scheduled_date)}
+                      </SelectItem>
+                    )
+                  })}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Template Selector */}
+            <div className="w-full lg:w-56">
+              <Select value={selectedTemplate} onValueChange={v => setSelectedTemplate(v as EmailTemplateType)}>
+                <SelectTrigger className="h-9 text-xs sm:text-sm">
+                  <SelectValue placeholder="Select template" />
+                </SelectTrigger>
+                <SelectContent>
+                  {TEMPLATES.map(tmpl => (
+                    <SelectItem key={tmpl.id} value={tmpl.id}>
+                      {tmpl.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Audience Filter */}
+            <div className="w-full lg:w-48">
+              <Select value={audienceFilter} onValueChange={setAudienceFilter}>
+                <SelectTrigger className="h-9 text-xs sm:text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Participants ({enrolledEmployees.length})</SelectItem>
+                  <SelectItem value="pending_attendance">Pending / Absent</SelectItem>
+                  <SelectItem value="present_only">Present Only</SelectItem>
+                  <SelectItem value="overdue">Overdue Records</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          {/* Clean Session Summary Bar */}
+          {currentSchedule && (
+            <div className="flex flex-wrap items-center justify-between gap-3 px-3.5 py-2.5 mb-5 rounded-xl bg-muted/40 border text-xs text-muted-foreground">
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <div>
+                  <span className="font-semibold text-foreground">Program: </span>
+                  <span>{currentTrainingName}</span>
                 </div>
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="bg-white">
-                    <Users className="h-3 w-3 mr-1 text-primary" /> {enrolledEmployees.length} Enrolled
+                <div>
+                  <span className="font-semibold text-foreground">Date: </span>
+                  <span>{formatDate(currentSchedule.scheduled_date)}</span>
+                </div>
+                <div>
+                  <span className="font-semibold text-foreground">Trainer: </span>
+                  <span>{currentSchedule.trainer_name}</span>
+                </div>
+                <div>
+                  <span className="font-semibold text-foreground">Group: </span>
+                  <span className="capitalize">{currentSchedule.group_type}</span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Badge variant="outline" className="bg-white">
+                  <Users className="h-3 w-3 mr-1 text-primary" /> {enrolledEmployees.length} Enrolled
+                </Badge>
+                {quiz ? (
+                  <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200">
+                    <FileQuestion className="h-3 w-3 mr-1" /> Quiz: {quiz.title}
                   </Badge>
-                  {quiz ? (
-                    <Badge variant="outline" className="bg-amber-50 text-amber-700 border-amber-200" title={quiz.form_link}>
-                      <FileQuestion className="h-3 w-3 mr-1" /> Quiz: {quiz.title} ({quiz.pass_score || 70}%)
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-muted-foreground">
-                      No Quiz Attached
-                    </Badge>
-                  )}
-                  {materials.length > 0 ? (
-                    <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
-                      <FolderOpen className="h-3 w-3 mr-1" /> {materials.length} Material(s) Attached
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-muted-foreground">
-                      No Materials
-                    </Badge>
-                  )}
-                </div>
+                ) : (
+                  <Badge variant="outline" className="text-muted-foreground bg-white">
+                    No Quiz Attached
+                  </Badge>
+                )}
+                {materials.length > 0 ? (
+                  <Badge variant="outline" className="bg-emerald-50 text-emerald-700 border-emerald-200">
+                    <FolderOpen className="h-3 w-3 mr-1" /> {materials.length} Material(s)
+                  </Badge>
+                ) : (
+                  <Badge variant="outline" className="text-muted-foreground bg-white">
+                    No Materials
+                  </Badge>
+                )}
               </div>
-            )}
-          </CardContent>
-        </Card>
+            </div>
+          )}
 
-        {/* How it Works / HR Escalations Guidelines Card */}
-        <Card className="bg-gradient-to-br from-slate-900 to-indigo-950 text-white shadow-md border-0">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-bold flex items-center gap-2 text-indigo-200">
-              <Sparkles className="h-4 w-4 text-indigo-400" /> How HR Alerts & Escalations Work
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 text-xs text-slate-300">
-            <div className="flex items-start gap-2">
-              <Send className="h-3.5 w-3.5 text-indigo-400 mt-0.5 flex-shrink-0" />
-              <div>
-                <strong className="text-white">Instant Dispatch:</strong> Click <em>Send Alert</em> on any employee to open a pre-filled email in your Mail app (Outlook, Windows Mail, Apple Mail) with their actual quiz & study links.
-              </div>
-            </div>
-            <div className="flex items-start gap-2">
-              <Copy className="h-3.5 w-3.5 text-indigo-400 mt-0.5 flex-shrink-0" />
-              <div>
-                <strong className="text-white">Template Preview:</strong> Click <em>Preview / Copy</em> to inspect or customize the exact formatted message before sending.
-              </div>
-            </div>
-            <div className="flex items-start gap-2">
-              <Users className="h-3.5 w-3.5 text-indigo-400 mt-0.5 flex-shrink-0" />
-              <div>
-                <strong className="text-white">Mass BCC:</strong> Click <em>Open Mass BCC in Mail Client</em> or <em>Copy All Emails</em> to dispatch to all enrolled recipients at once.
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-
-      {/* Template Selector Bar */}
-      <Card className="shadow-sm border">
-        <CardHeader className="pb-3">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div>
-              <CardTitle className="text-base">Email Template Library</CardTitle>
-              <CardDescription className="text-xs">
-                Select an alert template to configure the subject and automated placeholders.
-              </CardDescription>
-            </div>
-            {/* Mass Actions */}
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-xs border-slate-300 hover:bg-slate-100"
-                onClick={handleCopyAllEmails}
-              >
-                <Copy className="h-3.5 w-3.5 mr-1.5 text-slate-600" /> Copy All Emails ({filteredEmployees.length})
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-xs border-blue-300 bg-blue-50/50 text-blue-700 hover:bg-blue-100"
-                onClick={handleOpenMassBcc}
-                title="Opens your system default Mail App (Outlook, Apple Mail, Windows Mail)"
-              >
-                <ExternalLink className="h-3.5 w-3.5 mr-1.5 text-blue-600" /> Open Mass BCC in Mail Client
-              </Button>
-              <Button
-                size="sm"
-                className="text-xs"
-                onClick={() => openPreview()}
-              >
-                <MessageSquare className="h-3.5 w-3.5 mr-1.5" /> Preview Template
-              </Button>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
-            {TEMPLATES.map(tmpl => {
-              const IconComp = tmpl.icon
-              const isSelected = selectedTemplate === tmpl.id
-              return (
-                <div
-                  key={tmpl.id}
-                  onClick={() => setSelectedTemplate(tmpl.id)}
-                  className={`p-3 rounded-xl border-2 cursor-pointer transition-all ${
-                    isSelected
-                      ? 'border-primary bg-primary/5 shadow-sm'
-                      : 'border-border/60 hover:border-border hover:bg-slate-50'
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <div className={`p-1.5 rounded-lg ${tmpl.badgeColor}`}>
-                      <IconComp className="h-4 w-4" />
-                    </div>
-                    {isSelected && (
-                      <Badge className="bg-primary text-white text-[10px] py-0 px-1.5">
-                        Selected
-                      </Badge>
-                    )}
-                  </div>
-                  <p className="text-xs font-semibold text-foreground line-clamp-1">{tmpl.name}</p>
-                  <p className="text-[11px] text-muted-foreground truncate mt-0.5">{tmpl.subject}</p>
-                </div>
-              )
-            })}
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Enrolled Employees Recipient Table */}
-      <Card className="shadow-sm border">
-        <CardHeader className="pb-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <CardTitle className="text-base">
-                Enrolled Participants ({filteredEmployees.length} targeted)
-              </CardTitle>
-              <CardDescription className="text-xs">
-                Employees enrolled in "{currentTrainingName}" who will receive this notification with real resource & quiz links.
-              </CardDescription>
-            </div>
-          </div>
-        </CardHeader>
-        <CardContent>
+          {/* Clean Table matching EmployeesPage & TrainingsPage */}
           {loading ? (
             <div className="flex justify-center py-16">
               <div className="h-8 w-8 rounded-full border-4 border-primary/30 border-t-primary animate-spin" />
             </div>
           ) : filteredEmployees.length === 0 ? (
-            <div className="text-center py-12 text-muted-foreground">
-              <Users className="h-10 w-10 mx-auto mb-2 opacity-30" />
-              <p className="font-medium text-sm">No employees found for this training session & filter.</p>
-              <p className="text-xs text-muted-foreground mt-1">Try changing the schedule or audience filter above.</p>
+            <div className="flex flex-col items-center justify-center py-16 text-center text-muted-foreground">
+              <Mail className="h-12 w-12 text-muted-foreground/40 mb-3" />
+              <p className="font-medium text-muted-foreground">No participants found matching current filters</p>
+              <p className="text-xs text-muted-foreground/70 mt-1">Try switching the training session or search term</p>
             </div>
           ) : (
-            <div className="overflow-x-auto w-full">
-              <table className="data-table text-xs">
+            <div className="overflow-x-auto w-full -mx-4 sm:mx-0 px-4 sm:px-0">
+              <table className="data-table min-w-[700px]">
                 <thead>
                   <tr>
                     <th>Code</th>
-                    <th>Employee Name</th>
-                    <th>Email Address</th>
+                    <th>Name</th>
+                    <th>Email</th>
                     <th>Department</th>
                     <th>Attendance</th>
+                    <th>Status</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredEmployees.map(item => (
                     <tr key={item.employee.id}>
-                      <td><Badge variant="outline">{item.employee.employee_code}</Badge></td>
-                      <td className="font-medium text-slate-900 whitespace-nowrap">{item.employee.name}</td>
-                      <td className="text-muted-foreground whitespace-nowrap">{item.employee.email}</td>
-                      <td className="whitespace-nowrap">{item.employee.departments?.name || '—'}</td>
+                      <td>
+                        <Badge variant="outline">{item.employee.employee_code}</Badge>
+                      </td>
+                      <td className="font-medium whitespace-nowrap text-foreground">
+                        {item.employee.name}
+                      </td>
+                      <td className="text-muted-foreground whitespace-nowrap">
+                        {item.employee.email}
+                      </td>
+                      <td className="whitespace-nowrap">
+                        {item.employee.departments?.name || '—'}
+                      </td>
                       <td>
                         <Badge
                           variant={
@@ -694,9 +624,17 @@ export default function NotificationsPage() {
                               ? 'destructive'
                               : 'secondary'
                           }
-                          className="capitalize text-[11px]"
+                          className="capitalize text-xs font-normal"
                         >
                           {item.attendanceStatus?.replace('_', ' ') || 'Pending'}
+                        </Badge>
+                      </td>
+                      <td>
+                        <Badge 
+                          variant={item.employee.is_active ? 'success' : 'secondary'}
+                          className="text-xs font-normal"
+                        >
+                          {item.employee.is_active ? 'Active' : 'Inactive'}
                         </Badge>
                       </td>
                       <td>
@@ -704,20 +642,20 @@ export default function NotificationsPage() {
                           <Button
                             size="sm"
                             variant="outline"
-                            className="h-7 text-xs border-primary/40 text-primary hover:bg-primary/10"
+                            className="h-8 text-xs text-primary border-primary/30 hover:bg-primary/5"
                             onClick={() => handleSendIndividual(item.employee)}
-                            title="Redirects to your Mail App with pre-filled subject, body, and actual links"
+                            title="Send email via default Mail App"
                           >
-                            <Send className="h-3 w-3 mr-1" /> Send Alert
+                            <Send className="h-3.5 w-3.5 mr-1" /> Send Alert
                           </Button>
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="h-7 text-xs text-slate-600 hover:text-slate-900"
+                            className="h-8 text-xs text-muted-foreground hover:text-foreground"
                             onClick={() => openPreview(item.employee)}
-                            title="Preview formatted message"
+                            title="Preview and customize email"
                           >
-                            <Copy className="h-3 w-3 mr-1" /> Preview
+                            <Eye className="h-3.5 w-3.5 mr-1" /> Preview
                           </Button>
                         </div>
                       </td>
@@ -732,43 +670,41 @@ export default function NotificationsPage() {
 
       {/* Message Preview & Customization Dialog */}
       <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
-        <DialogContent className="sm:max-w-xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-[95vw] sm:max-w-xl max-h-[90vh] overflow-y-auto p-4 sm:p-6">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-base">
+            <DialogTitle className="flex items-center gap-2 text-base sm:text-lg">
               <MessageSquare className="h-5 w-5 text-primary" />
-              Preview & Copy Template
+              Preview & Customize Email Alert
             </DialogTitle>
           </DialogHeader>
 
           <div className="space-y-4 py-2">
             {previewEmployee && (
-              <div className="bg-slate-50 border rounded-lg p-2.5 text-xs flex items-center justify-between">
+              <div className="p-3 bg-muted/40 rounded-xl text-xs flex items-center justify-between border">
                 <div>
                   <span className="text-muted-foreground">Recipient: </span>
-                  <span className="font-semibold text-slate-800">{previewEmployee.name}</span>{' '}
+                  <span className="font-semibold text-foreground">{previewEmployee.name}</span>{' '}
                   <span className="text-muted-foreground">({previewEmployee.email})</span>
                 </div>
-                <Badge variant="outline" className="text-[10px]">
-                  Template: {currentTemplate.name}
+                <Badge variant="outline" className="bg-white">
+                  {currentTemplate.name}
                 </Badge>
               </div>
             )}
 
             <div className="space-y-1.5">
-              <Label htmlFor="preview-subject" className="text-xs font-semibold">Subject Line</Label>
+              <Label className="text-xs font-semibold">Subject Line</Label>
               <Input
-                id="preview-subject"
                 value={customSubject}
                 onChange={e => setCustomSubject(e.target.value)}
-                className="text-xs"
+                className="text-sm font-medium h-9"
               />
             </div>
 
             <div className="space-y-1.5">
-              <Label htmlFor="preview-body" className="text-xs font-semibold">Message Body (Contains actual resource & quiz links)</Label>
+              <Label className="text-xs font-semibold">Email Body Content</Label>
               <Textarea
-                id="preview-body"
-                rows={13}
+                rows={12}
                 value={customBody}
                 onChange={e => setCustomBody(e.target.value)}
                 className="font-mono text-xs leading-relaxed"
@@ -776,33 +712,27 @@ export default function NotificationsPage() {
             </div>
           </div>
 
-          <DialogFooter className="gap-2 mt-2">
-            <Button variant="outline" onClick={() => setPreviewOpen(false)}>
-              Close
-            </Button>
-            <Button
-              variant="secondary"
-              onClick={handleCopyPreview}
-              className="text-xs"
-            >
-              {copied ? (
-                <>
-                  <Check className="h-3.5 w-3.5 mr-1 text-emerald-600" /> Copied!
-                </>
-              ) : (
-                <>
-                  <Copy className="h-3.5 w-3.5 mr-1" /> Copy Message
-                </>
-              )}
-            </Button>
-            {previewEmployee && (
+          <DialogFooter className="gap-2 sm:gap-0 mt-2">
+            <div className="flex items-center gap-2 w-full justify-between">
               <Button
-                onClick={handleSendFromPreview}
+                variant="outline"
+                size="sm"
                 className="text-xs"
+                onClick={handleCopyPreview}
               >
-                <ExternalLink className="h-3.5 w-3.5 mr-1" /> Open in Mail App
+                {copied ? <Check className="h-3.5 w-3.5 mr-1 text-emerald-600" /> : <Copy className="h-3.5 w-3.5 mr-1" />}
+                {copied ? 'Copied!' : 'Copy to Clipboard'}
               </Button>
-            )}
+
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => setPreviewOpen(false)}>
+                  Close
+                </Button>
+                <Button size="sm" onClick={handleSendFromPreview} className="bg-primary text-white">
+                  <Send className="h-3.5 w-3.5 mr-1.5" /> Send in Mail App
+                </Button>
+              </div>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>

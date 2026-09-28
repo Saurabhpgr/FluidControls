@@ -151,24 +151,26 @@ export default function QuizzesPage() {
             ) : (
               <div className="space-y-3">
                 {quizzes.map(q => (
-                  <div key={q.id} className="flex items-center gap-4 p-4 rounded-xl border bg-card hover:bg-muted/30 transition-colors">
-                    <div className="h-10 w-10 rounded-lg bg-violet-100 flex items-center justify-center flex-shrink-0">
-                      <FileQuestion className="h-5 w-5 text-violet-600" />
+                  <div key={q.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 sm:p-4 rounded-xl border bg-card hover:bg-muted/30 transition-colors">
+                    <div className="flex items-start sm:items-center gap-3 min-w-0 flex-1">
+                      <div className="h-9 w-9 sm:h-10 sm:w-10 rounded-lg bg-violet-100 dark:bg-violet-900/40 flex items-center justify-center flex-shrink-0 mt-0.5 sm:mt-0">
+                        <FileQuestion className="h-4 w-4 sm:h-5 sm:w-5 text-violet-600 dark:text-violet-400" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-sm text-foreground break-words">{q.title}</p>
+                        <p className="text-xs text-muted-foreground truncate mt-0.5">{q.form_link}</p>
+                      </div>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-medium text-sm text-foreground">{q.title}</p>
-                      <p className="text-xs text-muted-foreground truncate mt-0.5">{q.form_link}</p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button variant="outline" size="sm" asChild className="h-8 text-xs">
+                    <div className="flex items-center justify-end gap-2 pt-2 sm:pt-0 border-t sm:border-t-0 border-border/50">
+                      <Button variant="outline" size="sm" asChild className="h-8 text-xs flex-1 sm:flex-none">
                         <a href={q.form_link} target="_blank" rel="noreferrer">
                           <ExternalLink className="h-3.5 w-3.5 mr-1" /> Open Form
                         </a>
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-600" onClick={() => openEditQuiz(q)} title="Edit Quiz">
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground flex-shrink-0" onClick={() => openEditQuiz(q)} title="Edit Quiz">
                         <Pencil className="h-4 w-4" />
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-red-600" onClick={() => handleDeleteQuiz(q)} title="Delete Quiz">
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-destructive flex-shrink-0" onClick={() => handleDeleteQuiz(q)} title="Delete Quiz">
                         <Trash2 className="h-4 w-4" />
                       </Button>
                     </div>

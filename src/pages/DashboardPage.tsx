@@ -152,11 +152,11 @@ export default function DashboardPage() {
           <h1 className="page-title text-gradient">Dashboard</h1>
           <p className="page-subtitle">FluidControl Employee Training Management System</p>
         </div>
-        <div className="flex gap-3">
-          <Button asChild variant="outline" size="sm">
+        <div className="flex flex-wrap gap-2 sm:gap-3">
+          <Button asChild variant="outline" size="sm" className="flex-1 sm:flex-none">
             <Link to="/trainings"><Plus className="h-4 w-4" /> New Training</Link>
           </Button>
-          <Button asChild size="sm">
+          <Button asChild size="sm" className="flex-1 sm:flex-none">
             <Link to="/schedules"><CalendarDays className="h-4 w-4" /> Schedule Training</Link>
           </Button>
         </div>
@@ -164,29 +164,31 @@ export default function DashboardPage() {
 
       {/* Overdue alert banner */}
       {stats.overdueCount > 0 && (
-        <div className="flex items-center gap-4 p-4 bg-red-50 border border-red-200 rounded-xl">
-          <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0" />
-          <div className="flex-1">
-            <p className="text-sm font-semibold text-red-800">
-              {stats.overdueCount} overdue training record{stats.overdueCount !== 1 ? 's' : ''} require attention
-            </p>
-            <p className="text-xs text-red-600 mt-0.5">Employees have missed their training deadlines</p>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 p-3.5 sm:p-4 bg-red-50 dark:bg-red-950/40 border border-red-200 dark:border-red-900 rounded-xl">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="h-5 w-5 text-red-600 flex-shrink-0" />
+            <div>
+              <p className="text-sm font-semibold text-red-800 dark:text-red-300">
+                {stats.overdueCount} overdue training record{stats.overdueCount !== 1 ? 's' : ''} require attention
+              </p>
+              <p className="text-xs text-red-600 dark:text-red-400 mt-0.5">Employees have missed their training deadlines</p>
+            </div>
           </div>
-          <Button asChild variant="destructive" size="sm">
+          <Button asChild variant="destructive" size="sm" className="w-full sm:w-auto flex-shrink-0">
             <Link to="/reports">View Overdue</Link>
           </Button>
         </div>
       )}
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5 sm:gap-4">
         {statCards.map(({ label, value, icon: Icon, color, link }) => (
-          <Link key={label} to={link} className="stat-card group">
-            <div className={`h-10 w-10 rounded-xl ${color} flex items-center justify-center mb-3 shadow-md group-hover:scale-110 transition-transform`}>
-              <Icon className="h-5 w-5 text-white" />
+          <Link key={label} to={link} className="stat-card p-3 sm:p-5 group">
+            <div className={`h-8 w-8 sm:h-10 sm:w-10 rounded-xl ${color} flex items-center justify-center mb-2 sm:mb-3 shadow-md group-hover:scale-110 transition-transform`}>
+              <Icon className="h-4 w-4 sm:h-5 sm:w-5 text-white" />
             </div>
-            <p className="text-2xl font-bold text-foreground">{value}</p>
-            <p className="text-xs text-muted-foreground mt-1 leading-tight">{label}</p>
+            <p className="text-xl sm:text-2xl font-bold text-foreground">{value}</p>
+            <p className="text-[11px] sm:text-xs text-muted-foreground mt-1 leading-tight">{label}</p>
           </Link>
         ))}
       </div>
