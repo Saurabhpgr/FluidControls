@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { Search, ClipboardCheck, Save, Download, CheckCircle, XCircle } from 'lucide-react'
+import { Search, ClipboardCheck, Save, Download, CheckCircle, XCircle, AlertTriangle, Lock } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { logAudit } from '@/lib/audit'
 import { exportToExcel } from '@/lib/excel'
@@ -73,23 +73,37 @@ export default function AttendancePage() {
     else { setAttendance([]); setSelectedSchedule(null) }
   }, [selectedScheduleId])
 
+  const todayStr = new Date().toISOString().split('T')[0]
+  const isFutureSchedule = Boolean(selectedSchedule && selectedSchedule.scheduled_date > todayStr)
+
   const markAll = (status: 'present' | 'absent') => {
+    if (isFutureSchedule && selectedSchedule) {
+      toast.warning(`Cannot mark attendance before scheduled date (${formatDate(selectedSchedule.scheduled_date)}).`)
+      return
+    }
     setAttendance(att => att.map(a => ({ ...a, attendance_status: status })))
   }
 
   const toggleStatus = (employeeId: string) => {
-    setAttendance(att => att.map(a =>
-      a.employee_id === employeeId
-        ? { ...a, attendance_status: a.attendance_status === 'present' ? 'absent' : 'present' }
-        : a
-    ))
+    if (isFutureSchedule && selectedSchedule) {
+      toast.warning(`Cannot mark attendance before scheduled date (${formatDate(selectedSchedule.scheduled_date)}).`)
+      return
+    }
+    setAttendance(att => att.map(a => {
+      if (a.employee_id === employeeId) {
+        // Toggle between present and absent directly
+        const nextStatus = a.attendance_status === 'present' ? 'absent' : 'present'
+        return { ...a, attendance_status: nextStatus }
+      }
+      return a
+    }))
   }
 
   const handleSave = async () => {
     if (!selectedScheduleId) return
-    const unmarked = attendance.filter(a => a.attendance_status === 'not_marked')
-    if (unmarked.length > 0) {
-      toast.error(`${unmarked.length} employees still not marked. Please mark all employees.`)
+
+    if (isFutureSchedule && selectedSchedule) {
+      toast.error(`Cannot record attendance before scheduled date (${formatDate(selectedSchedule.scheduled_date)}). Attendance opens on or after session date.`)
       return
     }
 
@@ -135,7 +149,10 @@ export default function AttendancePage() {
           }
 
           // 3. Mark schedule as completed if all marked
-          await supabase.from('training_schedules').update({ status: 'completed' }).eq('id', selectedScheduleId)
+          const hasUnmarked = attendance.some(a => a.attendance_status === 'not_marked')
+          if (!hasUnmarked) {
+            await supabase.from('training_schedules').update({ status: 'completed' }).eq('id', selectedScheduleId)
+          }
         }
       }
 
@@ -146,6 +163,7 @@ export default function AttendancePage() {
         details: {
           present: attendance.filter(a => a.attendance_status === 'present').length,
           absent: attendance.filter(a => a.attendance_status === 'absent').length,
+          not_marked: attendance.filter(a => a.attendance_status === 'not_marked').length,
         }
       })
 
@@ -231,7 +249,7 @@ export default function AttendancePage() {
 
       {selectedSchedule && (
         <Card className="overflow-hidden">
-          <CardHeader className="pb-4">
+          <CardHeader className="pb-4 space-y-3">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
               <div className="min-w-0 flex-1">
                 <CardTitle className="text-base sm:text-lg truncate">
@@ -248,14 +266,29 @@ export default function AttendancePage() {
                 <Button variant="outline" size="sm" onClick={handleExportPdf} disabled={attendance.length === 0} className="text-xs border-blue-300 text-blue-700 hover:bg-blue-50">
                   <Download className="h-3.5 w-3.5 mr-1 text-blue-600" /> Printable PDF
                 </Button>
-                <Button size="sm" onClick={handleSave} disabled={saving || attendance.length === 0} className="text-xs">
+                <Button 
+                  size="sm" 
+                  onClick={handleSave} 
+                  disabled={saving || attendance.length === 0 || isFutureSchedule} 
+                  className="text-xs"
+                >
                   <Save className="h-3.5 w-3.5 mr-1" /> {saving ? 'Saving…' : 'Save Attendance'}
                 </Button>
               </div>
             </div>
 
+            {/* Date Lock Banner if session is in the future */}
+            {isFutureSchedule && (
+              <div className="flex items-center gap-2.5 p-3 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-800 dark:text-amber-300 text-xs sm:text-sm font-medium">
+                <AlertTriangle className="h-4 w-4 sm:h-5 sm:w-5 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+                <div>
+                  <span className="font-semibold">Attendance Marking Locked:</span> This session is scheduled for <strong>{formatDate(selectedSchedule.scheduled_date)}</strong>. Attendance can only be marked on or after this date.
+                </div>
+              </div>
+            )}
+
             {attendance.length > 0 && (
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 mt-4 pt-3 border-t">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-3 border-t">
                 <div className="flex flex-wrap items-center gap-3 sm:gap-6 text-xs sm:text-sm">
                   <div className="flex items-center gap-1.5 font-medium text-emerald-700">
                     <div className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
@@ -277,6 +310,7 @@ export default function AttendancePage() {
                     variant="outline"
                     size="sm"
                     onClick={() => markAll('present')}
+                    disabled={isFutureSchedule}
                     className="flex-1 sm:flex-none text-xs text-emerald-700 border-emerald-300 hover:bg-emerald-50 h-8"
                   >
                     <CheckCircle className="h-3.5 w-3.5 mr-1" /> Mark All Present
@@ -285,6 +319,7 @@ export default function AttendancePage() {
                     variant="outline"
                     size="sm"
                     onClick={() => markAll('absent')}
+                    disabled={isFutureSchedule}
                     className="flex-1 sm:flex-none text-xs text-red-700 border-red-300 hover:bg-red-50 h-8"
                   >
                     <XCircle className="h-3.5 w-3.5 mr-1" /> Mark All Absent
@@ -309,7 +344,9 @@ export default function AttendancePage() {
                   <div
                     key={a.employee_id}
                     onClick={() => toggleStatus(a.employee_id)}
-                    className={`flex items-center justify-between gap-3 p-3 sm:p-4 rounded-xl cursor-pointer border-2 transition-all duration-200 min-w-0 ${
+                    className={`flex items-center justify-between gap-3 p-3 sm:p-4 rounded-xl border-2 transition-all duration-200 min-w-0 ${
+                      isFutureSchedule ? 'cursor-not-allowed opacity-80' : 'cursor-pointer'
+                    } ${
                       a.attendance_status === 'present'
                         ? 'bg-emerald-50 border-emerald-300 hover:bg-emerald-100'
                         : a.attendance_status === 'absent'

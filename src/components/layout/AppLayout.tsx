@@ -3,7 +3,7 @@ import { NavLink, useNavigate, Outlet } from 'react-router-dom'
 import { 
   LayoutDashboard, BookOpen, CalendarDays, Users, ClipboardCheck,
   FileQuestion, FolderOpen, BarChart3, Mail, LogOut, Menu, X,
-  Droplets, Bell, ChevronRight
+  Bell, ChevronRight
 } from 'lucide-react'
 import { useAuth } from '@/contexts/AuthContext'
 import { NotificationCenter } from '@/components/layout/NotificationCenter'
@@ -60,11 +60,11 @@ export function AppLayout() {
         {/* Logo */}
         <div className="flex items-center justify-between px-4 h-16 border-b border-[hsl(var(--sidebar-border)/0.5)]">
           <div className="flex items-center gap-3">
-            <div className="flex-shrink-0 h-8 w-8 rounded-lg gradient-primary flex items-center justify-center shadow-lg">
-              <Droplets className="h-4 w-4 text-white" />
+            <div className="flex-shrink-0 h-10 w-10 rounded-xl bg-white p-1 flex items-center justify-center shadow-md">
+              <img src="/Fluid-Controls-Logo.png" alt="Fluid Controls" className="h-full w-full object-contain" />
             </div>
             <div className={cn('overflow-hidden', !sidebarOpen && 'lg:hidden')}>
-              <p className="text-white font-bold text-sm leading-tight">FluidControl</p>
+              <p className="text-white font-bold text-sm leading-tight">Fluid Controls</p>
               <p className="text-[hsl(var(--sidebar-foreground)/0.5)] text-xs">Training System</p>
             </div>
           </div>

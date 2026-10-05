@@ -44,6 +44,9 @@ export default function DashboardPage() {
   const loadDashboard = async () => {
     setLoading(true)
     try {
+      // Sync overdue statuses automatically in the background
+      supabase.rpc('refresh_overdue_training_statuses').then().catch(() => {})
+
       const now = new Date()
       const quarterStart = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3, 1)
       const quarterEnd = new Date(now.getFullYear(), Math.floor(now.getMonth() / 3) * 3 + 3, 0)

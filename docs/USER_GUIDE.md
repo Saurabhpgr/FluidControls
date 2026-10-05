@@ -78,3 +78,18 @@ Welcome to the **FluidControl Employee Training Management System (ETMS)**. This
 2. View pending reminders, overdue warnings, and system announcements.
 3. Click **Mark all as read** to acknowledge notifications.
 4. Click **Clear read** to permanently remove cleared alerts from your view.
+
+---
+
+## 4. System Settings & Customization
+
+HR Administrators can customize business rules, branding, and email copy without contacting IT:
+1. Navigate to **System Settings** in the left sidebar menu.
+2. Select from the configuration tabs:
+   - **Company & Logo**: Update legal company name, facility address, ISO standards, and contact email.
+   - **Frequencies**: Modify training recurrence labels (e.g. Monthly, Quarterly, Annual).
+   - **Notification Rules**: Adjust reminder lead time (days) and overdue repeat intervals.
+   - **Email Templates**: Edit automated subject lines and body copy using dynamic placeholders (`{{employee_name}}`, `{{training_name}}`, `{{scheduled_date}}`).
+   - **Thresholds & Limits**: Configure default passing score %, maximum material upload size, and audit retention windows.
+3. Click **Save Changes** on any tab to immediately apply changes across the entire platform.
+

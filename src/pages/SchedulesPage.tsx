@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react'
+import React, { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   Plus,
@@ -18,7 +18,12 @@ import {
   X,
   ChevronLeft,
   ChevronRight,
-  Sparkles
+  Sparkles,
+  Calendar as CalendarIcon,
+  Eye,
+  CheckCircle,
+  XCircle,
+  Clock3
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { logAudit } from '@/lib/audit'
@@ -34,13 +39,9 @@ import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent } from '@/components/ui/card'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { Checkbox } from '@/components/ui/checkbox'
-import { formatDate, getStatusColor, addDaysToFrequency, getCalendarEventColor } from '@/lib/utils'
+import { formatDate, getStatusColor, addDaysToFrequency } from '@/lib/utils'
 import { toast } from 'sonner'
 import type { Training, Department, Employee, TrainingSchedule, GroupType, ScheduleStatus } from '@/types'
-import FullCalendar from '@fullcalendar/react'
-import dayGridPlugin from '@fullcalendar/daygrid'
-import timeGridPlugin from '@fullcalendar/timegrid'
-import interactionPlugin from '@fullcalendar/interaction'
 
 interface FormData {
   training_id: string
@@ -73,6 +74,9 @@ interface EnrolledEmployeeInfo {
   status: string
 }
 
+const WEEKDAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']
+const WEEKDAYS_SHORT = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
+
 export default function SchedulesPage() {
   const navigate = useNavigate()
   const [schedules, setSchedules] = useState<TrainingSchedule[]>([])
@@ -81,27 +85,25 @@ export default function SchedulesPage() {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState('all')
+  const [statusFilter, setStatusFilter] = useState<'all' | 'planned' | 'ongoing' | 'completed' | 'cancelled'>('all')
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<TrainingSchedule | null>(null)
   const [form, setForm] = useState<FormData>(defaultForm)
   const [saving, setSaving] = useState(false)
-  const [tab, setTab] = useState('calendar') // Default to calendar view as requested
+  const [tab, setTab] = useState('calendar') // Default to calendar view
 
-  // Google Calendar Quick Event Popover / Detail Dialog
+  // Interactive Month Calendar State
+  const [currentDate, setCurrentDate] = useState(() => new Date())
+  const [selectedDateStr, setSelectedDateStr] = useState(() => new Date().toISOString().split('T')[0])
+
+  // Quick Event Details Dialog
   const [selectedEventSchedule, setSelectedEventSchedule] = useState<TrainingSchedule | null>(null)
   const [eventDetailOpen, setEventDetailOpen] = useState(false)
   const [enrolledList, setEnrolledList] = useState<EnrolledEmployeeInfo[]>([])
   const [loadingEnrolled, setLoadingEnrolled] = useState(false)
 
-  // Calendar Responsive State
-  const [isMobile, setIsMobile] = useState(() => (typeof window !== 'undefined' ? window.innerWidth < 640 : false))
-
   useEffect(() => {
     loadAll()
-    const handleResize = () => setIsMobile(window.innerWidth < 640)
-    window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
   }, [])
 
   const loadAll = async () => {
@@ -126,7 +128,7 @@ export default function SchedulesPage() {
     setEditing(null)
     setForm({
       ...defaultForm,
-      scheduled_date: prefilledDate || '',
+      scheduled_date: prefilledDate || selectedDateStr || new Date().toISOString().split('T')[0],
     })
     setDialogOpen(true)
   }
@@ -153,7 +155,6 @@ export default function SchedulesPage() {
     setLoadingEnrolled(true)
 
     try {
-      // Fetch enrolled employees for this schedule
       const { data } = await supabase
         .from('attendance')
         .select('attendance_status, employees(id, name, employee_code, designation, departments(name))')
@@ -173,7 +174,6 @@ export default function SchedulesPage() {
         })
         setEnrolledList(mapped)
       } else {
-        // Fallback: calculate from group_type if attendance rows not yet generated
         let resolved: Employee[] = []
         if (schedule.group_type === 'all') {
           resolved = employees
@@ -198,7 +198,7 @@ export default function SchedulesPage() {
     }
   }
 
-  // Resolve employees for a given group configuration
+  // Resolve employees for form
   const resolveEmployees = (): Employee[] => {
     if (form.group_type === 'all') return employees
     if (form.group_type === 'department' && form.department_id) {
@@ -257,13 +257,11 @@ export default function SchedulesPage() {
         if (error) throw error
         scheduleId = data.id
 
-        // Resolve and persist employee roster
         const resolved = resolveEmployees()
         if (resolved.length > 0) {
           const seRows = resolved.map(e => ({ schedule_id: scheduleId, employee_id: e.id }))
           await supabase.from('schedule_employees').insert(seRows)
 
-          // Initialize attendance rows as not_marked
           const attRows = resolved.map(e => ({
             schedule_id: scheduleId,
             employee_id: e.id,
@@ -271,7 +269,6 @@ export default function SchedulesPage() {
           }))
           await supabase.from('attendance').insert(attRows)
 
-          // Initialize training history as pending
           const histRows = resolved.map(e => ({
             employee_id: e.id,
             training_id: form.training_id,
@@ -336,17 +333,6 @@ export default function SchedulesPage() {
     toast.success('Exported schedules to Excel')
   }
 
-  const getSuggestedDate = (trainingId: string): string => {
-    const training = trainings.find(t => t.id === trainingId)
-    if (!training || training.frequency === 'one_time' || training.frequency === 'as_required') return ''
-    const lastSchedule = schedules
-      .filter(s => s.training_id === trainingId && s.status === 'completed')
-      .sort((a, b) => new Date(b.scheduled_date).getTime() - new Date(a.scheduled_date).getTime())[0]
-    if (!lastSchedule) return ''
-    const nextDate = addDaysToFrequency(new Date(lastSchedule.scheduled_date), training.frequency)
-    return nextDate.toISOString().split('T')[0]
-  }
-
   const filtered = schedules.filter(s => {
     const matchSearch =
       (s as unknown as { trainings: { name: string } }).trainings?.name?.toLowerCase().includes(search.toLowerCase()) ||
@@ -356,549 +342,631 @@ export default function SchedulesPage() {
     return matchSearch && matchStatus
   })
 
-  // Calendar Event Mappings with Google Calendar styling colors
-  const calendarEvents = schedules.map(s => {
-    const trainingName = (s as unknown as { trainings: { name: string } }).trainings?.name || 'Training'
-    const color = getCalendarEventColor(s.status)
-    return {
-      id: s.id,
-      title: trainingName,
-      date: s.scheduled_date,
-      backgroundColor: color,
-      borderColor: color,
-      textColor: '#ffffff',
-      extendedProps: {
-        status: s.status,
-        trainer: s.trainer_name,
-        groupType: s.group_type,
-        department: (s as unknown as { departments: { name: string } })?.departments?.name || 'All',
-        scheduleObj: s,
-      },
+  // Calendar Month Navigation
+  const prevMonth = () => {
+    setCurrentDate(prev => new Date(prev.getFullYear(), prev.getMonth() - 1, 1))
+  }
+
+  const nextMonth = () => {
+    setCurrentDate(prev => new Date(prev.getFullYear(), prev.getMonth() + 1, 1))
+  }
+
+  const goToToday = () => {
+    const today = new Date()
+    setCurrentDate(today)
+    setSelectedDateStr(today.toISOString().split('T')[0])
+  }
+
+  // Month stats & Days Matrix calculation
+  const { daysMatrix, monthYearLabel, currentMonthStats, selectedDateEvents, selectedDateFormatted } = useMemo(() => {
+    const year = currentDate.getFullYear()
+    const month = currentDate.getMonth()
+
+    const monthNames = [
+      'January', 'February', 'March', 'April', 'May', 'June',
+      'July', 'August', 'September', 'October', 'November', 'December'
+    ]
+    const label = `${monthNames[month]} ${year}`
+
+    // Start of month day (0 = Sun, 1 = Mon ... 6 = Sat)
+    // Convert to Monday = 0, Sunday = 6
+    const firstDayIndex = new Date(year, month, 1).getDay()
+    const mondayBasedFirstDay = (firstDayIndex + 6) % 7
+
+    const totalDaysInMonth = new Date(year, month + 1, 0).getDate()
+
+    // Build grid cells
+    const cells: {
+      dayNumber: number | null
+      dateStr: string | null
+      isCurrentMonth: boolean
+      isToday: boolean
+      isSelected: boolean
+      events: TrainingSchedule[]
+    }[] = []
+
+    // Empty offset cells before 1st of month
+    for (let i = 0; i < mondayBasedFirstDay; i++) {
+      cells.push({
+        dayNumber: null,
+        dateStr: null,
+        isCurrentMonth: false,
+        isToday: false,
+        isSelected: false,
+        events: []
+      })
     }
-  })
+
+    const todayStr = new Date().toISOString().split('T')[0]
+
+    for (let day = 1; day <= totalDaysInMonth; day++) {
+      const dayStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+      const dayEvents = schedules.filter(s => s.scheduled_date === dayStr)
+
+      cells.push({
+        dayNumber: day,
+        dateStr: dayStr,
+        isCurrentMonth: true,
+        isToday: dayStr === todayStr,
+        isSelected: dayStr === selectedDateStr,
+        events: dayEvents,
+      })
+    }
+
+    // Fill trailing empty cells to complete the 7-column row
+    while (cells.length % 7 !== 0) {
+      cells.push({
+        dayNumber: null,
+        dateStr: null,
+        isCurrentMonth: false,
+        isToday: false,
+        isSelected: false,
+        events: []
+      })
+    }
+
+    // Calculate month stats
+    const monthPrefix = `${year}-${String(month + 1).padStart(2, '0')}`
+    const monthSchedules = schedules.filter(s => s.scheduled_date.startsWith(monthPrefix))
+    const totalCount = monthSchedules.length
+    const upcomingCount = monthSchedules.filter(s => s.status === 'planned').length
+    const completedCount = monthSchedules.filter(s => s.status === 'completed').length
+
+    // Selected Date details
+    const selectedEvents = schedules.filter(s => s.scheduled_date === selectedDateStr)
+
+    // Formatted selected date
+    let selFormatted = 'Selected Date'
+    if (selectedDateStr) {
+      const [sy, sm, sd] = selectedDateStr.split('-').map(Number)
+      const dObj = new Date(sy, sm - 1, sd)
+      const dayName = dObj.toLocaleDateString('en-US', { weekday: 'long' })
+      const monthName = dObj.toLocaleDateString('en-US', { month: 'long' })
+      selFormatted = `${dayName}, ${sd} ${monthName} ${sy}`
+    }
+
+    return {
+      daysMatrix: cells,
+      monthYearLabel: label,
+      currentMonthStats: { total: totalCount, upcoming: upcomingCount, completed: completedCount },
+      selectedDateEvents: selectedEvents,
+      selectedDateFormatted: selFormatted
+    }
+  }, [currentDate, schedules, selectedDateStr])
+
+  // Filter selected day events by active status filter if applicable
+  const displayedDayEvents = useMemo(() => {
+    if (statusFilter === 'all') return selectedDateEvents
+    return selectedDateEvents.filter(s => s.status === statusFilter)
+  }, [selectedDateEvents, statusFilter])
+
+  const getStatusDotColor = (status: ScheduleStatus) => {
+    switch (status) {
+      case 'planned':
+        return 'bg-blue-500'
+      case 'ongoing':
+        return 'bg-amber-500'
+      case 'completed':
+        return 'bg-emerald-500'
+      case 'cancelled':
+        return 'bg-slate-700'
+      default:
+        return 'bg-indigo-500'
+    }
+  }
 
   return (
-    <div className="space-y-6 animate-fade-in">
-      {/* Page Header */}
-      <div className="page-header flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+    <div className="space-y-5 animate-fade-in max-w-7xl mx-auto pb-10">
+      {/* Top Header Section */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="page-title">Training Schedule</h1>
-          <p className="page-subtitle">
-            {schedules.filter(s => s.status === 'planned').length} upcoming sessions | Google Calendar interactive scheduling
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100 font-serif sm:font-sans">
+            Training Calendar
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
+            Interactive schedule view of all corporate training programs and sessions
           </p>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Button variant="outline" size="sm" onClick={() => navigate('/emails')} className="border-slate-300 hover:bg-slate-100 h-9">
-            <Mail className="h-4 w-4 mr-1.5 text-blue-600" /> Send Alerts
-          </Button>
-          <Button variant="outline" size="sm" onClick={handleExport} className="border-slate-300 hover:bg-slate-100 h-9">
-            <Download className="h-4 w-4 mr-1.5 text-slate-700" /> Export
-          </Button>
-          <Button size="sm" onClick={() => openCreate()} className="h-9">
+
+        {/* Top Right Controls & Action Buttons */}
+        <div className="flex flex-wrap items-center gap-2.5">
+          {/* Navigation Pill (Today, <, Month Year, >) */}
+          <div className="inline-flex items-center rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs p-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={goToToday}
+              className="h-7 px-2.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"
+            >
+              Today
+            </Button>
+            <div className="h-4 w-px bg-slate-200 dark:bg-slate-800 mx-1" />
+            <button
+              onClick={prevMonth}
+              className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 transition-colors"
+              title="Previous Month"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            <span className="px-3 text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-200 min-w-28 sm:min-w-32 text-center select-none">
+              {monthYearLabel}
+            </span>
+            <button
+              onClick={nextMonth}
+              className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 transition-colors"
+              title="Next Month"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
+
+          <Button size="sm" onClick={() => openCreate()} className="h-9 font-medium shadow-xs">
             <Plus className="h-4 w-4 mr-1.5" /> Schedule Training
           </Button>
         </div>
       </div>
 
-      {/* Tabs for List View and Calendar View (Position Preserved) */}
-      <Tabs value={tab} onValueChange={setTab}>
-        <div className="flex items-center justify-between gap-2 mb-4">
-          <TabsList className="w-full sm:w-auto grid grid-cols-2 sm:inline-flex">
-            <TabsTrigger value="list">List View</TabsTrigger>
-            <TabsTrigger value="calendar">Calendar View</TabsTrigger>
-          </TabsList>
+      {/* Filter Pills & Month Statistics Banner */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 px-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs">
+        {/* Status Filter Pills */}
+        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+          <button
+            onClick={() => setStatusFilter('all')}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap ${
+              statusFilter === 'all'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200'
+            }`}
+          >
+            <span className="h-2 w-2 rounded-full bg-indigo-500" />
+            All Sessions
+          </button>
 
-          {tab === 'calendar' && (
-            <p className="hidden md:flex items-center gap-1 text-xs text-muted-foreground font-medium">
-              <Sparkles className="h-3.5 w-3.5 text-amber-500" /> Click any date cell to schedule | Click an event card for quick actions
-            </p>
-          )}
+          <button
+            onClick={() => setStatusFilter('planned')}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap ${
+              statusFilter === 'planned'
+                ? 'bg-blue-600 text-white shadow-xs'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200'
+            }`}
+          >
+            <span className="h-2 w-2 rounded-full bg-blue-500" />
+            Upcoming
+          </button>
+
+          <button
+            onClick={() => setStatusFilter('ongoing')}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap ${
+              statusFilter === 'ongoing'
+                ? 'bg-amber-600 text-white shadow-xs'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200'
+            }`}
+          >
+            <span className="h-2 w-2 rounded-full bg-amber-500" />
+            In Progress
+          </button>
+
+          <button
+            onClick={() => setStatusFilter('completed')}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap ${
+              statusFilter === 'completed'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200'
+            }`}
+          >
+            <span className="h-2 w-2 rounded-full bg-emerald-500" />
+            Completed
+          </button>
+
+          <button
+            onClick={() => setStatusFilter('cancelled')}
+            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap ${
+              statusFilter === 'cancelled'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200'
+            }`}
+          >
+            <span className="h-2 w-2 rounded-full bg-slate-950 dark:bg-slate-400" />
+            Cancelled
+          </button>
         </div>
 
-        {/* --- LIST VIEW --- */}
-        <TabsContent value="list">
-          <Card>
-            <CardContent className="p-3.5 sm:p-6">
-              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 mb-4 sm:mb-6">
-                <div className="relative flex-1 w-full sm:max-w-sm">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Search by training, trainer, dept…"
-                    value={search}
-                    onChange={e => setSearch(e.target.value)}
-                    className="pl-9 h-9"
+        {/* Month Summary Metrics */}
+        <div className="flex items-center gap-3 sm:gap-4 text-xs font-medium text-slate-600 dark:text-slate-400 self-end lg:self-auto flex-shrink-0">
+          <span>This Month: <strong className="text-slate-900 dark:text-slate-100">{currentMonthStats.total}</strong> total</span>
+          <span className="text-blue-600 dark:text-blue-400 font-bold">{currentMonthStats.upcoming} Upcoming</span>
+          <span className="text-emerald-600 dark:text-emerald-400 font-bold">{currentMonthStats.completed} Completed</span>
+        </div>
+      </div>
+
+      {/* Main Grid View & Detail Panel Layout */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        {/* LEFT: 7-Column Calendar Grid (7 to 8 Columns on lg) */}
+        <div className="lg:col-span-8 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs overflow-hidden">
+          {/* Weekday Header Row */}
+          <div className="grid grid-cols-7 border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/40 text-center text-[11px] sm:text-xs font-bold text-slate-600 dark:text-slate-400 py-3">
+            {WEEKDAYS.map((day, i) => (
+              <div key={day}>
+                <span className="hidden sm:inline">{day}</span>
+                <span className="sm:hidden">{WEEKDAYS_SHORT[i]}</span>
+              </div>
+            ))}
+          </div>
+
+          {/* 7-Column Month Days Matrix */}
+          <div className="grid grid-cols-7 divide-x divide-y divide-slate-100 dark:divide-slate-800/60 bg-slate-100 dark:bg-slate-800/40">
+            {daysMatrix.map((cell, idx) => {
+              if (!cell.isCurrentMonth) {
+                return (
+                  <div
+                    key={`empty-${idx}`}
+                    className="bg-white dark:bg-slate-900 min-h-20 sm:min-h-28 p-1.5 sm:p-2.5 opacity-30 select-none"
                   />
-                </div>
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-full sm:w-44 h-9">
-                    <SelectValue placeholder="Filter Status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Status</SelectItem>
-                    <SelectItem value="planned">Planned</SelectItem>
-                    <SelectItem value="ongoing">Ongoing</SelectItem>
-                    <SelectItem value="completed">Completed</SelectItem>
-                    <SelectItem value="cancelled">Cancelled</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+                )
+              }
 
-              {loading ? (
-                <div className="flex justify-center py-16">
-                  <div className="h-8 w-8 rounded-full border-4 border-primary/30 border-t-primary animate-spin" />
-                </div>
-              ) : filtered.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 text-center">
-                  <CalendarDays className="h-12 w-12 text-muted-foreground/40 mb-3" />
-                  <p className="font-semibold text-slate-700">No scheduled sessions found</p>
-                  <p className="text-xs text-muted-foreground mt-1 max-w-sm">
-                    Create a new session or click any date on the calendar tab.
-                  </p>
-                  <Button className="mt-4" size="sm" onClick={() => openCreate()}>
-                    <Plus className="h-4 w-4 mr-1.5" /> Schedule Training
-                  </Button>
-                </div>
-              ) : (
-                <div className="overflow-x-auto w-full -mx-3.5 sm:mx-0 px-3.5 sm:px-0">
-                  <table className="data-table min-w-[700px]">
-                    <thead>
-                      <tr>
-                        <th>Training Course</th>
-                        <th>Scheduled Date</th>
-                        <th>Trainer Name</th>
-                        <th>Target Group</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {filtered.map(s => (
-                        <tr key={s.id}>
-                          <td className="font-semibold text-slate-900 whitespace-nowrap">
-                            {(s as unknown as { trainings: { name: string } }).trainings?.name}
-                          </td>
-                          <td className="whitespace-nowrap font-medium text-slate-700">{formatDate(s.scheduled_date)}</td>
-                          <td className="whitespace-nowrap text-slate-600">{s.trainer_name}</td>
-                          <td className="capitalize whitespace-nowrap text-xs text-muted-foreground">
-                            {s.group_type === 'department'
-                              ? `Dept: ${(s as unknown as { departments: { name: string } }).departments?.name || '—'}`
-                              : s.group_type === 'all'
-                              ? 'All Employees'
-                              : 'Selected Staff'}
-                          </td>
-                          <td>
-                            <span className={`status-badge ${getStatusColor(s.status)}`}>{s.status}</span>
-                          </td>
-                          <td>
-                            <div className="flex items-center gap-1.5">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="h-8 text-xs text-primary hover:bg-primary/10"
-                                onClick={() => openEventDetails(s)}
-                              >
-                                View Details
-                              </Button>
-                              <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-600" onClick={() => openEdit(s)} title="Edit Schedule">
-                                <Pencil className="h-3.5 w-3.5" />
-                              </Button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </CardContent>
-          </Card>
-        </TabsContent>
+              // Filter cell events by status if active
+              const visibleEvents = statusFilter === 'all'
+                ? cell.events
+                : cell.events.filter(e => e.status === statusFilter)
 
-        {/* --- GOOGLE CALENDAR VIEW --- */}
-        <TabsContent value="calendar">
-          <Card className="border-border/80 shadow-sm overflow-hidden">
-            <CardContent className="p-3 sm:p-6">
-              <div className="google-calendar-container">
-                <FullCalendar
-                  plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-                  initialView={isMobile ? 'dayGridMonth' : 'dayGridMonth'}
-                  events={calendarEvents}
-                  headerToolbar={{
-                    left: 'prev,next today',
-                    center: 'title',
-                    right: isMobile ? 'dayGridMonth,timeGridDay' : 'dayGridMonth,timeGridWeek,timeGridDay',
-                  }}
-                  buttonText={{
-                    today: 'Today',
-                    month: 'Month',
-                    week: 'Week',
-                    day: 'Day',
-                  }}
-                  editable={true}
-                  selectable={true}
-                  selectMirror={true}
-                  dayMaxEvents={isMobile ? 2 : 3}
-                  aspectRatio={isMobile ? 0.85 : 1.65}
-                  height="auto"
-                  dateClick={info => {
-                    openCreate(info.dateStr)
-                    toast.info(`Scheduling training for ${formatDate(info.dateStr)}`)
-                  }}
-                  eventClick={info => {
-                    const s = schedules.find(sched => sched.id === info.event.id)
-                    if (s) {
-                      openEventDetails(s)
-                    }
-                  }}
-                  eventContent={eventInfo => {
-                    const status = eventInfo.event.extendedProps.status || 'planned'
-                    return (
-                      <div className="flex items-center gap-1.5 px-1.5 py-0.5 w-full overflow-hidden text-left">
-                        <span
-                          className="h-1.5 w-1.5 rounded-full flex-shrink-0"
-                          style={{ backgroundColor: getCalendarEventColor(status) }}
-                        />
-                        <span className="truncate text-xs font-semibold">{eventInfo.event.title}</span>
+              return (
+                <div
+                  key={cell.dateStr}
+                  onClick={() => cell.dateStr && setSelectedDateStr(cell.dateStr)}
+                  onDoubleClick={() => cell.dateStr && openCreate(cell.dateStr)}
+                  className={`bg-white dark:bg-slate-900 min-h-20 sm:min-h-28 p-1.5 sm:p-2 flex flex-col justify-between cursor-pointer transition-all duration-150 relative group select-none ${
+                    cell.isSelected
+                      ? 'bg-indigo-50/70 dark:bg-indigo-950/30 ring-2 ring-indigo-500 ring-inset z-10'
+                      : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                  }`}
+                >
+                  {/* Top Day Number */}
+                  <div className="flex items-center justify-between">
+                    {cell.isToday ? (
+                      <span className="h-6 w-6 sm:h-7 sm:w-7 rounded-full bg-indigo-600 text-white font-bold text-xs flex items-center justify-center shadow-xs">
+                        {cell.dayNumber}
+                      </span>
+                    ) : (
+                      <span
+                        className={`text-xs sm:text-sm font-semibold ${
+                          cell.isSelected
+                            ? 'text-indigo-600 dark:text-indigo-400 font-bold'
+                            : 'text-slate-700 dark:text-slate-300'
+                        }`}
+                      >
+                        {cell.dayNumber}
+                      </span>
+                    )}
+
+                    {/* Plus icon on hover for quick add */}
+                    <button
+                      onClick={e => {
+                        e.stopPropagation()
+                        if (cell.dateStr) openCreate(cell.dateStr)
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-0.5 rounded text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 transition-opacity"
+                      title="Schedule on this date"
+                    >
+                      <Plus className="h-3 w-3" />
+                    </button>
+                  </div>
+
+                  {/* Events Container */}
+                  <div className="mt-1 space-y-1 overflow-hidden flex-1">
+                    {visibleEvents.slice(0, 2).map(ev => {
+                      const trName = (ev as unknown as { trainings: { name: string } })?.trainings?.name || 'Training'
+                      const dotColor = getStatusDotColor(ev.status)
+                      return (
+                        <div
+                          key={ev.id}
+                          onClick={e => {
+                            e.stopPropagation()
+                            openEventDetails(ev)
+                          }}
+                          className="px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 hover:bg-indigo-100 dark:hover:bg-indigo-900/50 border border-slate-200/60 dark:border-slate-700/50 text-[10px] sm:text-[11px] font-medium text-slate-800 dark:text-slate-200 truncate flex items-center gap-1 transition-colors"
+                          title={`${trName} (${ev.trainer_name})`}
+                        >
+                          <span className={`h-1.5 w-1.5 rounded-full flex-shrink-0 ${dotColor}`} />
+                          <span className="truncate">{trName}</span>
+                        </div>
+                      )
+                    })}
+
+                    {visibleEvents.length > 2 && (
+                      <div className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 px-1">
+                        +{visibleEvents.length - 2} more
                       </div>
-                    )
-                  }}
-                />
-              </div>
+                    )}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
 
-              {/* Status Color Legend */}
-              <div className="flex flex-wrap items-center justify-between gap-3 mt-4 pt-4 border-t text-xs">
-                <div className="flex flex-wrap items-center gap-4">
-                  {[
-                    ['planned', '#3B82F6', 'Planned'],
-                    ['ongoing', '#F59E0B', 'Ongoing'],
-                    ['completed', '#10B981', 'Completed'],
-                    ['cancelled', '#EF4444', 'Cancelled'],
-                  ].map(([status, color, label]) => (
-                    <div key={status} className="flex items-center gap-1.5">
-                      <div className="h-3 w-3 rounded-full shadow-2xs" style={{ backgroundColor: color }} />
-                      <span className="font-medium text-slate-700">{label}</span>
+        {/* RIGHT: Selected Day Schedule Details Card (Matching Screenshot exactly) */}
+        <div className="lg:col-span-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs p-5 sm:p-6 space-y-5">
+          {/* Header */}
+          <div>
+            <p className="text-indigo-600 dark:text-indigo-400 font-bold text-[11px] sm:text-xs tracking-wider uppercase mb-1">
+              TODAY'S SCHEDULE
+            </p>
+            <h2 className="text-base sm:text-lg font-bold text-slate-900 dark:text-slate-100">
+              {selectedDateFormatted}
+            </h2>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              {displayedDayEvents.length === 0
+                ? 'No sessions scheduled'
+                : `${displayedDayEvents.length} session${displayedDayEvents.length > 1 ? 's' : ''} scheduled`}
+            </p>
+          </div>
+
+          {/* Event Content List or Empty State */}
+          {displayedDayEvents.length === 0 ? (
+            <div className="py-12 flex flex-col items-center justify-center text-center space-y-3">
+              <div className="h-12 w-12 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center text-slate-400">
+                <CalendarIcon className="h-6 w-6 stroke-1" />
+              </div>
+              <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 max-w-[220px]">
+                No training programs scheduled for this date.
+              </p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => openCreate(selectedDateStr)}
+                className="mt-2 text-xs border-indigo-200 text-indigo-600 hover:bg-indigo-50"
+              >
+                <Plus className="h-3.5 w-3.5 mr-1" /> Schedule Session
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3 max-h-[460px] overflow-y-auto pr-1">
+              {displayedDayEvents.map(s => {
+                const trName = (s as unknown as { trainings: { name: string } })?.trainings?.name || 'Training'
+                const deptName = (s as unknown as { departments: { name: string } })?.departments?.name || 'All Departments'
+                return (
+                  <div
+                    key={s.id}
+                    className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-950/40 hover:bg-indigo-50/40 dark:hover:bg-indigo-950/20 transition-all space-y-2.5"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-bold text-sm text-slate-900 dark:text-slate-100 truncate">
+                          {trName}
+                        </p>
+                        <p className="text-xs text-slate-500 dark:text-slate-400 flex items-center gap-1 mt-0.5">
+                          <User className="h-3 w-3 text-indigo-500" /> Trainer: <strong>{s.trainer_name}</strong>
+                        </p>
+                      </div>
+                      <Badge variant="outline" className={`text-[10px] capitalize font-semibold ${getStatusColor(s.status)}`}>
+                        {s.status}
+                      </Badge>
+                    </div>
+
+                    <div className="flex items-center gap-3 text-xs text-slate-500">
+                      <span className="flex items-center gap-1">
+                        <Users className="h-3 w-3" /> Group: <strong className="capitalize">{s.group_type}</strong>
+                      </span>
+                      {s.group_type === 'department' && (
+                        <span className="truncate">({deptName})</span>
+                      )}
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="flex items-center gap-2 pt-2 border-t border-slate-200/60 dark:border-slate-800/80">
+                      <Button
+                        variant="default"
+                        size="sm"
+                        onClick={() => openEventDetails(s)}
+                        className="h-7 text-xs flex-1"
+                      >
+                        <Eye className="h-3 w-3 mr-1" /> View Roster
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => navigate('/attendance')}
+                        className="h-7 text-xs border-emerald-300 text-emerald-700 hover:bg-emerald-50"
+                        title="Mark Attendance"
+                      >
+                        <ClipboardCheck className="h-3 w-3 mr-1 text-emerald-600" /> Attendance
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => openEdit(s)}
+                        className="h-7 w-7 text-slate-500 hover:text-slate-900"
+                        title="Edit Schedule"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Roster & Quick Event Detail Dialog */}
+      <Dialog open={eventDetailOpen} onOpenChange={setEventDetailOpen}>
+        <DialogContent className="sm:max-w-2xl max-h-[85vh] flex flex-col">
+          <DialogHeader>
+            <div className="flex items-start justify-between gap-3 pr-6">
+              <div>
+                <DialogTitle className="text-lg">
+                  {(selectedEventSchedule as unknown as { trainings: { name: string } })?.trainings?.name || 'Training Session Details'}
+                </DialogTitle>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Scheduled for {selectedEventSchedule && formatDate(selectedEventSchedule.scheduled_date)} · Trainer: {selectedEventSchedule?.trainer_name}
+                </p>
+              </div>
+              {selectedEventSchedule && (
+                <Badge variant="outline" className={`capitalize ${getStatusColor(selectedEventSchedule.status)}`}>
+                  {selectedEventSchedule.status}
+                </Badge>
+              )}
+            </div>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-y-auto space-y-4 py-2">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-3 bg-muted/40 rounded-xl text-xs">
+              <div>
+                <span className="text-muted-foreground">Target Group:</span>
+                <p className="font-semibold capitalize mt-0.5">{selectedEventSchedule?.group_type}</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Enrolled Trainees:</span>
+                <p className="font-semibold text-primary mt-0.5">{enrolledList.length} Employees</p>
+              </div>
+              <div>
+                <span className="text-muted-foreground">Department:</span>
+                <p className="font-semibold mt-0.5 truncate">
+                  {(selectedEventSchedule as unknown as { departments: { name: string } })?.departments?.name || 'All'}
+                </p>
+              </div>
+            </div>
+
+            {selectedEventSchedule?.notes && (
+              <div className="p-3 bg-slate-50 dark:bg-slate-900 border rounded-xl text-xs space-y-1">
+                <span className="font-semibold text-slate-700 dark:text-slate-300">Session Notes:</span>
+                <p className="text-muted-foreground">{selectedEventSchedule.notes}</p>
+              </div>
+            )}
+
+            {/* Enrolled Employee List */}
+            <div className="space-y-2">
+              <h4 className="text-xs font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+                Assigned Employee Roster ({enrolledList.length})
+              </h4>
+              {loadingEnrolled ? (
+                <div className="flex justify-center py-8">
+                  <div className="h-6 w-6 rounded-full border-4 border-primary/30 border-t-primary animate-spin" />
+                </div>
+              ) : enrolledList.length === 0 ? (
+                <p className="text-xs text-muted-foreground text-center py-4">No employees assigned to this schedule.</p>
+              ) : (
+                <div className="divide-y divide-border border rounded-xl overflow-hidden max-h-56 overflow-y-auto">
+                  {enrolledList.map(emp => (
+                    <div key={emp.id} className="p-2.5 flex items-center justify-between text-xs hover:bg-muted/30">
+                      <div>
+                        <p className="font-medium">{emp.name}</p>
+                        <p className="text-[11px] text-muted-foreground font-mono">{emp.code} · {emp.department} ({emp.designation})</p>
+                      </div>
+                      <Badge variant="outline" className={`text-[10px] capitalize ${getStatusColor(emp.status)}`}>
+                        {emp.status.replace('_', ' ')}
+                      </Badge>
                     </div>
                   ))}
                 </div>
-                <p className="text-muted-foreground text-[11px]">
-                  Showing {calendarEvents.length} scheduled event(s) on calendar
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-
-      {/* --- GOOGLE CALENDAR EVENT DETAIL MODAL --- */}
-      <Dialog open={eventDetailOpen} onOpenChange={setEventDetailOpen}>
-        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto p-0 gap-0 border-0 rounded-2xl shadow-2xl">
-          {selectedEventSchedule && (
-            <div>
-              {/* Header Banner */}
-              <div
-                className="p-5 text-white relative rounded-t-2xl"
-                style={{
-                  background:
-                    selectedEventSchedule.status === 'completed'
-                      ? 'linear-gradient(135deg, #059669 0%, #10B981 100%)'
-                      : selectedEventSchedule.status === 'ongoing'
-                      ? 'linear-gradient(135deg, #D97706 0%, #F59E0B 100%)'
-                      : selectedEventSchedule.status === 'cancelled'
-                      ? 'linear-gradient(135deg, #DC2626 0%, #EF4444 100%)'
-                      : 'linear-gradient(135deg, #1E3A8A 0%, #2563EB 100%)',
-                }}
-              >
-                <div className="flex items-start justify-between gap-3 pr-8">
-                  <div>
-                    <span className="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-bold uppercase tracking-wider bg-white/20 backdrop-blur-xs mb-2">
-                      {selectedEventSchedule.status}
-                    </span>
-                    <h2 className="text-xl font-bold leading-tight">
-                      {(selectedEventSchedule as unknown as { trainings: { name: string } }).trainings?.name || 'Training Course'}
-                    </h2>
-                    {(selectedEventSchedule as unknown as { trainings: { frequency?: string } }).trainings?.frequency && (
-                      <p className="text-xs text-white/80 mt-0.5 capitalize">
-                        Recurrence: {(selectedEventSchedule as unknown as { trainings: { frequency: string } }).trainings.frequency.replace('_', ' ')}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {/* Event Body */}
-              <div className="p-5 space-y-4 text-sm bg-white">
-                {/* Time & Trainer Info */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 p-3.5 bg-slate-50 rounded-xl border border-slate-100">
-                  <div className="flex items-center gap-2.5">
-                    <Clock className="h-4 w-4 text-primary flex-shrink-0" />
-                    <div>
-                      <p className="text-[11px] text-muted-foreground font-medium">Scheduled Date</p>
-                      <p className="font-semibold text-slate-800">{formatDate(selectedEventSchedule.scheduled_date)}</p>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-2.5">
-                    <User className="h-4 w-4 text-primary flex-shrink-0" />
-                    <div>
-                      <p className="text-[11px] text-muted-foreground font-medium">Trainer</p>
-                      <p className="font-semibold text-slate-800">{selectedEventSchedule.trainer_name}</p>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Target Audience */}
-                <div className="flex items-center justify-between p-3.5 bg-slate-50 rounded-xl border border-slate-100">
-                  <div className="flex items-center gap-2.5">
-                    <Users className="h-4 w-4 text-primary flex-shrink-0" />
-                    <div>
-                      <p className="text-[11px] text-muted-foreground font-medium">Target Audience</p>
-                      <p className="font-semibold text-slate-800 capitalize">
-                        {selectedEventSchedule.group_type === 'department'
-                          ? `Department: ${(selectedEventSchedule as unknown as { departments: { name: string } }).departments?.name || 'Assigned'}`
-                          : selectedEventSchedule.group_type === 'all'
-                          ? 'All Company Employees'
-                          : 'Custom Selected Employees'}
-                      </p>
-                    </div>
-                  </div>
-                  <Badge variant="outline" className="font-mono text-xs">
-                    {loadingEnrolled ? '...' : `${enrolledList.length} Enrolled`}
-                  </Badge>
-                </div>
-
-                {/* Notes */}
-                {selectedEventSchedule.notes && (
-                  <div className="p-3 bg-slate-50/70 rounded-xl border border-slate-100">
-                    <p className="text-[11px] text-muted-foreground font-medium mb-0.5">Notes & Agenda</p>
-                    <p className="text-xs text-slate-700 whitespace-pre-wrap">{selectedEventSchedule.notes}</p>
-                  </div>
-                )}
-
-                {/* Enrolled Employees Roster */}
-                <div className="space-y-2">
-                  <div className="flex items-center justify-between">
-                    <p className="text-xs font-bold text-slate-700">Enrolled Trainee Roster</p>
-                    <span className="text-[11px] text-muted-foreground">
-                      {enrolledList.filter(e => e.status === 'present').length} Present,{' '}
-                      {enrolledList.filter(e => e.status === 'absent').length} Absent
-                    </span>
-                  </div>
-
-                  <div className="max-h-40 overflow-y-auto border border-slate-200 rounded-xl divide-y divide-slate-100">
-                    {loadingEnrolled ? (
-                      <div className="py-6 text-center text-xs text-muted-foreground">Loading trainee roster…</div>
-                    ) : enrolledList.length === 0 ? (
-                      <div className="py-6 text-center text-xs text-muted-foreground">No employees enrolled</div>
-                    ) : (
-                      enrolledList.map(emp => (
-                        <div key={emp.id} className="flex items-center justify-between px-3 py-2 text-xs">
-                          <div>
-                            <span className="font-semibold text-slate-800">{emp.name}</span>
-                            <span className="text-muted-foreground text-[11px] ml-1.5 font-mono">({emp.code})</span>
-                          </div>
-                          <span
-                            className={`text-[10px] font-bold px-2 py-0.5 rounded-full capitalize ${
-                              emp.status === 'present'
-                                ? 'bg-emerald-100 text-emerald-700'
-                                : emp.status === 'absent'
-                                ? 'bg-red-100 text-red-700'
-                                : 'bg-slate-100 text-slate-600'
-                            }`}
-                          >
-                            {emp.status.replace('_', ' ')}
-                          </span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                {/* Quick Actions Footer */}
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-3 border-t">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-9 text-xs"
-                    onClick={handleDownloadPdfSheet}
-                    title="Download Printable PDF Sheet with Signatures"
-                  >
-                    <FileText className="h-3.5 w-3.5 mr-1.5 text-rose-600" /> PDF Sheet
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="h-9 text-xs"
-                    onClick={() => openEdit(selectedEventSchedule)}
-                  >
-                    <Pencil className="h-3.5 w-3.5 mr-1.5 text-slate-700" /> Edit Session
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="h-9 text-xs font-semibold"
-                    onClick={() => {
-                      setEventDetailOpen(false)
-                      navigate('/attendance')
-                    }}
-                  >
-                    <ClipboardCheck className="h-3.5 w-3.5 mr-1.5" /> Mark Attendance
-                  </Button>
-                </div>
-              </div>
+              )}
             </div>
-          )}
+          </div>
+
+          <DialogFooter className="gap-2 pt-3 border-t">
+            <Button variant="outline" size="sm" onClick={handleDownloadPdfSheet} disabled={enrolledList.length === 0}>
+              <Download className="h-4 w-4 mr-1.5 text-blue-600" /> Download Attendance Sheet PDF
+            </Button>
+            <Button size="sm" onClick={() => { setEventDetailOpen(false); navigate('/attendance') }}>
+              <ClipboardCheck className="h-4 w-4 mr-1.5" /> Mark Attendance
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* --- CREATE / EDIT SCHEDULE DIALOG --- */}
+      {/* Schedule Create / Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-xl max-h-[90vh] flex flex-col">
           <DialogHeader>
-            <DialogTitle>{editing ? 'Edit Training Session' : 'Schedule New Training'}</DialogTitle>
+            <DialogTitle>{editing ? 'Edit Training Schedule' : 'Schedule a Training Session'}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
+
+          <div className="flex-1 overflow-y-auto space-y-4 py-2 pr-1">
             <div className="space-y-1.5">
-              <Label>
-                Training Course <span className="text-red-500">*</span>
-              </Label>
-              <Select
-                value={form.training_id}
-                onValueChange={v => {
-                  const suggested = getSuggestedDate(v)
-                  setForm(f => ({ ...f, training_id: v, scheduled_date: f.scheduled_date || suggested }))
-                }}
-              >
-                <SelectTrigger className="h-9">
-                  <SelectValue placeholder="Select training course" />
-                </SelectTrigger>
+              <Label>Training Course *</Label>
+              <Select value={form.training_id} onValueChange={v => setForm(f => ({ ...f, training_id: v }))}>
+                <SelectTrigger><SelectValue placeholder="Select course…" /></SelectTrigger>
                 <SelectContent>
                   {trainings.map(t => (
-                    <SelectItem key={t.id} value={t.id}>
-                      {t.name}
-                    </SelectItem>
+                    <SelectItem key={t.id} value={t.id}>{t.name} ({t.frequency})</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              {form.training_id && getSuggestedDate(form.training_id) && (
-                <p className="text-xs text-primary font-medium flex items-center gap-1">
-                  💡 Suggested Next Occurrence: {formatDate(getSuggestedDate(form.training_id))}
-                </p>
-              )}
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <Label>
-                  Scheduled Date <span className="text-red-500">*</span>
-                </Label>
+                <Label>Scheduled Date *</Label>
                 <Input
                   type="date"
                   value={form.scheduled_date}
                   onChange={e => setForm(f => ({ ...f, scheduled_date: e.target.value }))}
-                  className="h-9"
                 />
               </div>
+
               <div className="space-y-1.5">
-                <Label>
-                  Trainer Name <span className="text-red-500">*</span>
-                </Label>
+                <Label>Trainer Name *</Label>
                 <Input
                   placeholder="e.g. Dr. Rajesh Sharma"
                   value={form.trainer_name}
                   onChange={e => setForm(f => ({ ...f, trainer_name: e.target.value }))}
-                  className="h-9"
                 />
               </div>
             </div>
 
-            <div className="space-y-1.5">
-              <Label>
-                Target Employee Group <span className="text-red-500">*</span>
-              </Label>
-              <Select
-                value={form.group_type}
-                onValueChange={v =>
-                  setForm(f => ({
-                    ...f,
-                    group_type: v as GroupType,
-                    department_id: '',
-                    selected_employees: [],
-                  }))
-                }
-              >
-                <SelectTrigger className="h-9">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Company Employees ({employees.length})</SelectItem>
-                  <SelectItem value="department">By Department</SelectItem>
-                  <SelectItem value="selected">Custom Selected Staff</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {form.group_type === 'department' && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div className="space-y-1.5">
-                <Label>
-                  Select Department <span className="text-red-500">*</span>
-                </Label>
-                <Select
-                  value={form.department_id}
-                  onValueChange={v => setForm(f => ({ ...f, department_id: v }))}
-                >
-                  <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Choose department" />
-                  </SelectTrigger>
+                <Label>Target Audience *</Label>
+                <Select value={form.group_type} onValueChange={v => setForm(f => ({ ...f, group_type: v as GroupType }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {departments.map(d => (
-                      <SelectItem key={d.id} value={d.id}>
-                        {d.name} ({employees.filter(e => e.department_id === d.id).length} staff)
-                      </SelectItem>
-                    ))}
+                    <SelectItem value="all">All Employees ({employees.length})</SelectItem>
+                    <SelectItem value="department">Specific Department</SelectItem>
+                    <SelectItem value="selected">Selected Employees</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
-            )}
 
-            {form.group_type === 'selected' && (
-              <div className="space-y-2">
-                <div className="flex items-center justify-between">
-                  <Label>
-                    Select Staff Members <span className="text-red-500">*</span>
-                  </Label>
-                  <span className="text-xs text-primary font-medium">
-                    {form.selected_employees.length} of {employees.length} selected
-                  </span>
+              {form.group_type === 'department' && (
+                <div className="space-y-1.5">
+                  <Label>Department *</Label>
+                  <Select value={form.department_id} onValueChange={v => setForm(f => ({ ...f, department_id: v }))}>
+                    <SelectTrigger><SelectValue placeholder="Choose department…" /></SelectTrigger>
+                    <SelectContent>
+                      {departments.map(d => (
+                        <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-                <div className="border border-slate-200 rounded-xl p-3 max-h-48 overflow-y-auto space-y-2 bg-slate-50/50">
-                  {employees.map(e => (
-                    <div key={e.id} className="flex items-center gap-2.5 p-1 rounded hover:bg-white transition-colors">
-                      <Checkbox
-                        id={`emp-${e.id}`}
-                        checked={form.selected_employees.includes(e.id)}
-                        onCheckedChange={checked => {
-                          setForm(f => ({
-                            ...f,
-                            selected_employees: checked
-                              ? [...f.selected_employees, e.id]
-                              : f.selected_employees.filter(id => id !== e.id),
-                          }))
-                        }}
-                      />
-                      <label htmlFor={`emp-${e.id}`} className="text-xs cursor-pointer flex-1 font-medium text-slate-700">
-                        {e.name} <span className="text-muted-foreground font-mono font-normal">({e.employee_code})</span>
-                      </label>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+              )}
 
-            {editing && (
               <div className="space-y-1.5">
-                <Label>Schedule Status</Label>
+                <Label>Status</Label>
                 <Select value={form.status} onValueChange={v => setForm(f => ({ ...f, status: v as ScheduleStatus }))}>
-                  <SelectTrigger className="h-9">
-                    <SelectValue />
-                  </SelectTrigger>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="planned">Planned</SelectItem>
                     <SelectItem value="ongoing">Ongoing</SelectItem>
@@ -907,34 +975,69 @@ export default function SchedulesPage() {
                   </SelectContent>
                 </Select>
               </div>
+            </div>
+
+            {/* Individual Employee Selection Multi-select */}
+            {form.group_type === 'selected' && (
+              <div className="space-y-2 border rounded-xl p-3 bg-muted/20">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold">Select Employees ({form.selected_employees.length} selected)</Label>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-xs text-primary"
+                    onClick={() => {
+                      const allIds = employees.map(e => e.id)
+                      setForm(f => ({
+                        ...f,
+                        selected_employees: f.selected_employees.length === allIds.length ? [] : allIds,
+                      }))
+                    }}
+                  >
+                    {form.selected_employees.length === employees.length ? 'Deselect All' : 'Select All'}
+                  </Button>
+                </div>
+                <div className="max-h-44 overflow-y-auto space-y-1.5 divide-y divide-border/50">
+                  {employees.map(emp => {
+                    const isChecked = form.selected_employees.includes(emp.id)
+                    return (
+                      <label key={emp.id} className="flex items-center gap-2.5 p-1.5 hover:bg-muted/40 rounded cursor-pointer text-xs">
+                        <Checkbox
+                          checked={isChecked}
+                          onCheckedChange={checked => {
+                            setForm(f => ({
+                              ...f,
+                              selected_employees: checked
+                                ? [...f.selected_employees, emp.id]
+                                : f.selected_employees.filter(id => id !== emp.id),
+                            }))
+                          }}
+                        />
+                        <span className="font-medium">{emp.name}</span>
+                        <span className="text-muted-foreground font-mono text-[11px]">({emp.employee_code})</span>
+                      </label>
+                    )
+                  })}
+                </div>
+              </div>
             )}
 
             <div className="space-y-1.5">
-              <Label>Notes & Location</Label>
+              <Label>Session Notes / Agenda (Optional)</Label>
               <Textarea
-                placeholder="Meeting room, Zoom link, preparation notes..."
+                rows={3}
+                placeholder="Key learning objectives, location / meeting room, required materials..."
                 value={form.notes}
                 onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-                rows={2}
               />
             </div>
-
-            {!editing && form.training_id && (
-              <div className="bg-primary/5 border border-primary/20 rounded-xl p-3 flex items-center justify-between">
-                <span className="text-xs font-medium text-slate-700">Total Enrolled Trainees:</span>
-                <Badge variant="default" className="font-bold">
-                  {resolveEmployees().length} Employees
-                </Badge>
-              </div>
-            )}
           </div>
 
-          <DialogFooter className="gap-2 mt-4 flex-col sm:flex-row">
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
-              Cancel
-            </Button>
+          <DialogFooter className="gap-2 pt-3 border-t">
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>Cancel</Button>
             <Button onClick={handleSave} disabled={saving}>
-              {saving ? 'Saving…' : editing ? 'Save Changes' : 'Create Schedule'}
+              {saving ? 'Saving…' : editing ? 'Save Changes' : 'Schedule Session'}
             </Button>
           </DialogFooter>
         </DialogContent>

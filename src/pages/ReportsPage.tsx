@@ -47,6 +47,11 @@ export default function ReportsPage() {
 
   const loadAll = async () => {
     setLoading(true)
+    try {
+      await supabase.rpc('refresh_overdue_training_statuses')
+    } catch {
+      // ignore if RPC not yet created in Supabase
+    }
     const [{ data: h }, { data: t }, { data: d }, { data: e }] = await Promise.all([
       supabase.from('employee_training_history')
         .select('*, employees(*, departments(*)), trainings(*), training_schedules(scheduled_date, trainer_name)')
