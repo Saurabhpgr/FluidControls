@@ -27,11 +27,33 @@ CREATE TABLE IF NOT EXISTS trainings (
 );
 
 -- ============================================================
--- 3. EMPLOYEES
 -- ============================================================
+-- 3. EMPLOYEES (with Sequence-based Unique & Immutable Code)
+-- ============================================================
+CREATE SEQUENCE IF NOT EXISTS employee_code_seq START WITH 101;
+
+CREATE OR REPLACE FUNCTION generate_employee_code()
+RETURNS text AS $$
+DECLARE
+  next_val bigint;
+  new_code text;
+  code_exists boolean;
+BEGIN
+  LOOP
+    next_val := nextval('employee_code_seq');
+    new_code := 'FC' || LPAD(next_val::text, 3, '0');
+    
+    SELECT EXISTS(SELECT 1 FROM employees WHERE employee_code = new_code) INTO code_exists;
+    IF NOT code_exists THEN
+      RETURN new_code;
+    END IF;
+  END LOOP;
+END;
+$$ LANGUAGE plpgsql;
+
 CREATE TABLE IF NOT EXISTS employees (
   id uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
-  employee_code text NOT NULL UNIQUE,
+  employee_code text NOT NULL UNIQUE DEFAULT generate_employee_code() CONSTRAINT check_employee_code_format CHECK (employee_code ~ '^FC[0-9A-Za-z_-]{2,}$'),
   name text NOT NULL,
   email text NOT NULL,
   department_id uuid NOT NULL REFERENCES departments(id) ON DELETE RESTRICT,
@@ -41,6 +63,22 @@ CREATE TABLE IF NOT EXISTS employees (
 
 CREATE INDEX IF NOT EXISTS idx_employees_department ON employees(department_id);
 CREATE INDEX IF NOT EXISTS idx_employees_active ON employees(is_active);
+
+-- Prevent any modification of employee_code to guarantee permanent immutability
+CREATE OR REPLACE FUNCTION prevent_employee_code_mutation()
+RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.employee_code IS DISTINCT FROM OLD.employee_code THEN
+    RAISE EXCEPTION 'employee_code is permanent and immutable (Attempted to modify from % to %). Code modifications are strictly prohibited.', OLD.employee_code, NEW.employee_code;
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_protect_employee_code ON employees;
+CREATE TRIGGER trg_protect_employee_code
+BEFORE UPDATE ON employees
+FOR EACH ROW EXECUTE FUNCTION prevent_employee_code_mutation();
 
 -- ============================================================
 -- 4. TRAINING SCHEDULES

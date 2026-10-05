@@ -16,7 +16,8 @@ import {
   X,
   Info,
   UserCheck,
-  UserPlus
+  UserPlus,
+  Lock
 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { logAudit } from '@/lib/audit'
@@ -135,7 +136,7 @@ export default function EmployeesPage() {
   }
 
   const handleSaveEmp = async () => {
-    if (!empForm.employee_code.trim() || !empForm.name.trim() || !empForm.email.trim() || !empForm.department_id || !empForm.designation.trim()) {
+    if (!empForm.name.trim() || !empForm.email.trim() || !empForm.department_id || !empForm.designation.trim()) {
       toast.error('All fields marked with * are required')
       return
     }
@@ -148,21 +149,40 @@ export default function EmployeesPage() {
     setSaving(true)
     try {
       if (editingEmp) {
-        const { error } = await supabase.from('employees').update(empForm).eq('id', editingEmp.id)
+        // Employee Code is strictly immutable: omit from update payload
+        const updatePayload = {
+          name: empForm.name.trim(),
+          email: empForm.email.trim(),
+          department_id: empForm.department_id,
+          designation: empForm.designation.trim(),
+          is_active: empForm.is_active,
+        }
+        const { error } = await supabase.from('employees').update(updatePayload).eq('id', editingEmp.id)
         if (error) throw error
-        await logAudit({ action: 'employee_updated', entity_type: 'employee', entity_id: editingEmp.id, details: { name: empForm.name } })
+        await logAudit({ action: 'employee_updated', entity_type: 'employee', entity_id: editingEmp.id, details: { name: empForm.name, code: editingEmp.employee_code } })
         toast.success('Employee updated successfully')
       } else {
-        const { data, error } = await supabase.from('employees').insert(empForm).select().single()
+        // New Employee: let database sequence generate the unique code if not provided
+        const insertPayload: Record<string, unknown> = {
+          name: empForm.name.trim(),
+          email: empForm.email.trim(),
+          department_id: empForm.department_id,
+          designation: empForm.designation.trim(),
+          is_active: empForm.is_active,
+        }
+        if (empForm.employee_code.trim()) {
+          insertPayload.employee_code = empForm.employee_code.trim().toUpperCase()
+        }
+        const { data, error } = await supabase.from('employees').insert(insertPayload).select().single()
         if (error) throw error
-        await logAudit({ action: 'employee_created', entity_type: 'employee', entity_id: data.id, details: { name: empForm.name } })
-        toast.success('Employee added successfully')
+        await logAudit({ action: 'employee_created', entity_type: 'employee', entity_id: data.id, details: { name: empForm.name, code: data.employee_code } })
+        toast.success(`Employee added successfully (${data.employee_code})`)
       }
       setEmpDialog(false)
       loadAll()
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : 'Failed to save employee'
-      toast.error(msg.includes('duplicate') || msg.includes('unique') ? 'Employee code already exists' : msg)
+      toast.error(msg.includes('duplicate') || msg.includes('unique') || msg.includes('employee_code') ? 'Employee code collision or mutation rejected' : msg)
     } finally {
       setSaving(false)
     }
@@ -174,7 +194,7 @@ export default function EmployeesPage() {
       toast.error('Failed to update status')
       return
     }
-    toast.success(`Employee ${emp.is_active ? 'deactivated' : 'activated'}`)
+    toast.success(`Employee ${emp.is_active ? 'deactivated (code retained)' : 'activated'}`)
     loadAll()
   }
 
@@ -284,16 +304,16 @@ export default function EmployeesPage() {
         return
       }
 
-      // Existing employee codes in DB for fast lookup
-      const existingCodeMap = new Set(employees.map(e => e.employee_code.trim().toLowerCase()))
+      // Existing employee codes in DB for fast lookup (all active + inactive/retired)
+      const existingCodeMap = new Set(employees.map(e => e.employee_code.trim().toUpperCase()))
       const fileCodeOccurrences = new Map<string, number>()
 
-      // First pass: track duplicate codes within the file
+      // First pass: count code occurrences within file
       rawData.forEach(row => {
         for (const [k, v] of Object.entries(row)) {
           const lk = k.toLowerCase().replace(/[^a-z]/g, '')
           if (lk === 'employeecode' || lk === 'empcode' || lk === 'code' || lk === 'empid' || lk === 'id') {
-            const code = String(v).trim().toLowerCase()
+            const code = String(v).trim().toUpperCase()
             if (code) {
               fileCodeOccurrences.set(code, (fileCodeOccurrences.get(code) || 0) + 1)
             }
@@ -316,7 +336,8 @@ export default function EmployeesPage() {
           return ''
         }
 
-        const code = getVal('Employee Code', 'EmployeeCode', 'Emp Code', 'Code', 'Emp ID', 'ID', 'Staff ID')
+        const rawCode = getVal('Employee Code', 'EmployeeCode', 'Emp Code', 'Code', 'Emp ID', 'ID', 'Staff ID')
+        const code = rawCode.toUpperCase()
         const name = getVal('Name', 'Employee Name', 'Full Name', 'Emp Name', 'Staff Name')
         const email = getVal('Email', 'Email Address', 'EmailAddress', 'Mail', 'E-mail')
         const departmentName = getVal('Department', 'Dept', 'Department Name', 'Team')
@@ -329,31 +350,37 @@ export default function EmployeesPage() {
 
         let valid = true
         let error = ''
-        const cleanCode = code.toLowerCase()
 
-        if (!code) {
-          valid = false
-          error = 'Missing Employee Code'
-        } else if (fileCodeOccurrences.get(cleanCode)! > 1) {
-          valid = false
-          error = 'Duplicate Code in file'
-        } else if (!name) {
-          valid = false
-          error = 'Missing Name'
-        } else if (!email || !email.includes('@')) {
-          valid = false
-          error = 'Invalid Email'
-        } else if (!departmentName) {
-          valid = false
-          error = 'Missing Department'
-        } else if (!designation) {
-          valid = false
-          error = 'Missing Designation'
+        if (code) {
+          if (!/^FC[0-9A-Za-z_-]{2,}$/.test(code)) {
+            valid = false
+            error = 'Invalid Code format (must start with FC, e.g. FC101)'
+          } else if ((fileCodeOccurrences.get(code) || 0) > 1) {
+            valid = false
+            error = `Duplicate code '${code}' in import file`
+          } else if (existingCodeMap.has(code)) {
+            valid = false
+            error = `Code '${code}' is already assigned to an existing/retired employee (immutable)`
+          }
         }
 
-        const isExisting = Boolean(code && existingCodeMap.has(cleanCode))
+        if (valid) {
+          if (!name) {
+            valid = false
+            error = 'Missing Name'
+          } else if (!email || !email.includes('@')) {
+            valid = false
+            error = 'Invalid Email'
+          } else if (!departmentName) {
+            valid = false
+            error = 'Missing Department'
+          } else if (!designation) {
+            valid = false
+            error = 'Missing Designation'
+          }
+        }
 
-        return { code, name, email, departmentName, designation, status, valid, error, isExisting }
+        return { code: code || '(Auto-generated)', name, email, departmentName, designation, status, valid, error, isExisting: false }
       })
 
       setParsedRows(mapped)
@@ -412,33 +439,35 @@ export default function EmployeesPage() {
         }
       }
 
-      // 2. Prepare employee payload for upsert
-      const employeesToUpsert = validRows.map(r => ({
-        employee_code: r.code,
-        name: r.name,
-        email: r.email,
-        department_id: deptMap.get(r.departmentName.toLowerCase().trim()) || departments[0]?.id,
-        designation: r.designation,
-        is_active: r.status === 'Active',
-      }))
+      // 2. Prepare employee payload for insert
+      const employeesToInsert = validRows.map(r => {
+        const rowData: Record<string, unknown> = {
+          name: r.name,
+          email: r.email,
+          department_id: deptMap.get(r.departmentName.toLowerCase().trim()) || departments[0]?.id,
+          designation: r.designation,
+          is_active: r.status === 'Active',
+        }
+        if (r.code && r.code !== '(Auto-generated)') {
+          rowData.employee_code = r.code
+        }
+        return rowData
+      })
 
-      // Upsert into Supabase on employee_code conflict
-      const { error: upsertErr } = await supabase
+      // Insert into Supabase (database sequence auto-generates if employee_code is omitted)
+      const { error: insertErr } = await supabase
         .from('employees')
-        .upsert(employeesToUpsert, { onConflict: 'employee_code' })
+        .insert(employeesToInsert)
 
-      if (upsertErr) throw upsertErr
-
-      const newCount = validRows.filter(r => !r.isExisting).length
-      const updateCount = validRows.filter(r => r.isExisting).length
+      if (insertErr) throw insertErr
 
       await logAudit({
         action: 'employees_imported',
         entity_type: 'employee',
-        details: { count: validRows.length, newCount, updateCount, file: importFile?.name },
+        details: { count: validRows.length, file: importFile?.name },
       })
 
-      toast.success(`Import complete! ${newCount} created, ${updateCount} updated.`)
+      toast.success(`Import complete! ${validRows.length} new employees created.`)
       setImportDialog(false)
       setImportFile(null)
       setParsedRows([])
@@ -909,12 +938,30 @@ export default function EmployeesPage() {
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-3">
               <div className="space-y-1.5">
-                <Label>Employee Code *</Label>
-                <Input
-                  placeholder="e.g. FC001"
-                  value={empForm.employee_code}
-                  onChange={e => setEmpForm(f => ({ ...f, employee_code: e.target.value }))}
-                />
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-semibold text-slate-700">Employee Code</Label>
+                  <Badge variant="outline" className={`text-[10px] ${editingEmp ? 'bg-amber-50 text-amber-700 border-amber-200' : 'bg-slate-100 text-slate-600 border-slate-200'}`}>
+                    {editingEmp ? 'Immutable' : 'Auto-Generated'}
+                  </Badge>
+                </div>
+                <div className="relative">
+                  <Input
+                    disabled
+                    readOnly
+                    value={editingEmp ? empForm.employee_code : 'Auto-generated on Save (e.g. FC101)'}
+                    className={`font-mono text-xs cursor-not-allowed ${
+                      editingEmp
+                        ? 'bg-slate-100 font-semibold text-slate-900 border-slate-300'
+                        : 'bg-slate-50 text-muted-foreground border-dashed'
+                    }`}
+                  />
+                  <Lock className={`absolute right-2.5 top-2.5 h-4 w-4 ${editingEmp ? 'text-amber-600' : 'text-slate-400'}`} />
+                </div>
+                <p className="text-[10px] text-muted-foreground">
+                  {editingEmp
+                    ? 'Unique identifier permanently locked across all modules.'
+                    : 'Generated automatically by database sequence on creation.'}
+                </p>
               </div>
               <div className="space-y-1.5">
                 <Label>Full Name *</Label>
