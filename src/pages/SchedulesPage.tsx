@@ -90,7 +90,7 @@ export default function SchedulesPage() {
   const [editing, setEditing] = useState<TrainingSchedule | null>(null)
   const [form, setForm] = useState<FormData>(defaultForm)
   const [saving, setSaving] = useState(false)
-  const [tab, setTab] = useState('calendar') // Default to calendar view
+  const [tab, setTab] = useState<'list' | 'calendar'>('list')
 
   // Interactive Month Calendar State
   const [currentDate, setCurrentDate] = useState(() => new Date())
@@ -480,67 +480,237 @@ export default function SchedulesPage() {
       {/* Top Header Section */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100 font-serif sm:font-sans">
-            Training Calendar
+          <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-slate-900 dark:text-slate-100">
+            Training Schedule
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Interactive schedule view of all corporate training programs and sessions
+            {schedules.filter(s => s.status === 'planned').length} planned sessions
           </p>
         </div>
 
         {/* Top Right Controls & Action Buttons */}
         <div className="flex flex-wrap items-center gap-2.5">
-          {/* Navigation Pill (Today, <, Month Year, >) */}
-          <div className="inline-flex items-center rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs p-1">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={goToToday}
-              className="h-7 px-2.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"
-            >
-              Today
-            </Button>
-            <div className="h-4 w-px bg-slate-200 dark:bg-slate-800 mx-1" />
-            <button
-              onClick={prevMonth}
-              className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 transition-colors"
-              title="Previous Month"
-            >
-              <ChevronLeft className="h-4 w-4" />
-            </button>
-            <span className="px-3 text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-200 min-w-28 sm:min-w-32 text-center select-none">
-              {monthYearLabel}
-            </span>
-            <button
-              onClick={nextMonth}
-              className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 transition-colors"
-              title="Next Month"
-            >
-              <ChevronRight className="h-4 w-4" />
-            </button>
-          </div>
-
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate('/emails')}
+            className="h-9 border-slate-300 hover:bg-slate-100 text-slate-700 shadow-xs"
+          >
+            <Mail className="h-4 w-4 mr-1.5 text-blue-600" /> Send Alerts
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExport}
+            className="h-9 border-slate-300 hover:bg-slate-100 text-slate-700 shadow-xs"
+          >
+            <Download className="h-4 w-4 mr-1.5 text-slate-700" /> Export
+          </Button>
           <Button size="sm" onClick={() => openCreate()} className="h-9 font-medium shadow-xs">
             <Plus className="h-4 w-4 mr-1.5" /> Schedule Training
           </Button>
         </div>
       </div>
 
-      {/* Filter Pills & Month Statistics Banner */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 px-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs">
-        {/* Status Filter Pills */}
-        <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
-          <button
-            onClick={() => setStatusFilter('all')}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap ${
-              statusFilter === 'all'
-                ? 'bg-slate-900 text-white shadow-xs'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200'
-            }`}
-          >
-            <span className="h-2 w-2 rounded-full bg-indigo-500" />
-            All Sessions
-          </button>
+      {/* Two Tabs: List View and Calendar View */}
+      <Tabs value={tab} onValueChange={v => setTab(v as 'list' | 'calendar')} className="space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <TabsList className="bg-slate-100 dark:bg-slate-800 p-1 rounded-xl h-auto w-full sm:w-auto grid grid-cols-2 sm:inline-flex">
+            <TabsTrigger
+              value="list"
+              className="rounded-lg px-4 py-2 text-xs sm:text-sm font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-slate-900 data-[state=active]:text-slate-900 dark:data-[state=active]:text-slate-100 data-[state=active]:shadow-xs transition-all"
+            >
+              List View
+            </TabsTrigger>
+            <TabsTrigger
+              value="calendar"
+              className="rounded-lg px-4 py-2 text-xs sm:text-sm font-medium data-[state=active]:bg-white dark:data-[state=active]:bg-slate-900 data-[state=active]:text-slate-900 dark:data-[state=active]:text-slate-100 data-[state=active]:shadow-xs transition-all"
+            >
+              Calendar View
+            </TabsTrigger>
+          </TabsList>
+
+          {/* Month Navigation Pill (Visible when on Calendar Tab) */}
+          {tab === 'calendar' && (
+            <div className="inline-flex items-center rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-xs p-1 self-start sm:self-auto">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={goToToday}
+                className="h-7 px-2.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg"
+              >
+                Today
+              </Button>
+              <div className="h-4 w-px bg-slate-200 dark:bg-slate-800 mx-1" />
+              <button
+                onClick={prevMonth}
+                className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 transition-colors"
+                title="Previous Month"
+              >
+                <ChevronLeft className="h-4 w-4" />
+              </button>
+              <span className="px-3 text-xs sm:text-sm font-bold text-slate-800 dark:text-slate-200 min-w-28 sm:min-w-32 text-center select-none">
+                {monthYearLabel}
+              </span>
+              <button
+                onClick={nextMonth}
+                className="p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-600 dark:text-slate-400 transition-colors"
+                title="Next Month"
+              >
+                <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* --- LIST VIEW CONTENT --- */}
+        <TabsContent value="list" className="mt-0 space-y-4">
+          <Card className="rounded-2xl border-slate-200/80 dark:border-slate-800 shadow-xs overflow-hidden">
+            <CardContent className="p-4 sm:p-6 space-y-4">
+              {/* Search and Status Filter Row */}
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                <div className="relative flex-1 max-w-sm">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    placeholder="Search schedules..."
+                    value={search}
+                    onChange={e => setSearch(e.target.value)}
+                    className="pl-9 h-10 bg-slate-50/70 dark:bg-slate-900 border-slate-200 dark:border-slate-800 rounded-xl text-xs sm:text-sm"
+                  />
+                </div>
+                <Select value={statusFilter} onValueChange={(v: any) => setStatusFilter(v)}>
+                  <SelectTrigger className="w-full sm:w-44 h-10 bg-slate-50/70 dark:bg-slate-900 border-slate-200 dark:border-slate-800 rounded-xl text-xs sm:text-sm">
+                    <SelectValue placeholder="All Status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="planned">Planned</SelectItem>
+                    <SelectItem value="ongoing">Ongoing</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
+                    <SelectItem value="cancelled">Cancelled</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              {/* Table or Empty State */}
+              {loading ? (
+                <div className="flex justify-center py-16">
+                  <div className="h-8 w-8 rounded-full border-4 border-primary/30 border-t-primary animate-spin" />
+                </div>
+              ) : filtered.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 text-center">
+                  <CalendarDays className="h-12 w-12 text-muted-foreground/40 mb-3" />
+                  <p className="font-semibold text-slate-700 dark:text-slate-300">No scheduled sessions found</p>
+                  <p className="text-xs text-muted-foreground mt-1 max-w-sm">
+                    {search || statusFilter !== 'all'
+                      ? 'No sessions match your search criteria. Try adjusting filters.'
+                      : 'Schedule a new training session to get started.'}
+                  </p>
+                  <Button className="mt-4" size="sm" onClick={() => openCreate()}>
+                    <Plus className="h-4 w-4 mr-1.5" /> Schedule Training
+                  </Button>
+                </div>
+              ) : (
+                <div className="overflow-x-auto rounded-xl border border-slate-100 dark:border-slate-800">
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th className="py-3 px-4 text-[11px] sm:text-xs font-semibold tracking-wider text-slate-500 dark:text-slate-400 uppercase bg-slate-50/80 dark:bg-slate-900/80">
+                          TRAINING
+                        </th>
+                        <th className="py-3 px-4 text-[11px] sm:text-xs font-semibold tracking-wider text-slate-500 dark:text-slate-400 uppercase bg-slate-50/80 dark:bg-slate-900/80">
+                          DATE
+                        </th>
+                        <th className="py-3 px-4 text-[11px] sm:text-xs font-semibold tracking-wider text-slate-500 dark:text-slate-400 uppercase bg-slate-50/80 dark:bg-slate-900/80">
+                          TRAINER
+                        </th>
+                        <th className="py-3 px-4 text-[11px] sm:text-xs font-semibold tracking-wider text-slate-500 dark:text-slate-400 uppercase bg-slate-50/80 dark:bg-slate-900/80">
+                          GROUP
+                        </th>
+                        <th className="py-3 px-4 text-[11px] sm:text-xs font-semibold tracking-wider text-slate-500 dark:text-slate-400 uppercase bg-slate-50/80 dark:bg-slate-900/80">
+                          STATUS
+                        </th>
+                        <th className="py-3 px-4 text-[11px] sm:text-xs font-semibold tracking-wider text-slate-500 dark:text-slate-400 uppercase bg-slate-50/80 dark:bg-slate-900/80 text-right sm:text-left">
+                          ACTIONS
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                      {filtered.map(s => {
+                        const trName = (s as unknown as { trainings: { name: string } }).trainings?.name || '—'
+                        const deptName = (s as unknown as { departments: { name: string } })?.departments?.name
+                        return (
+                          <tr key={s.id} className="hover:bg-slate-50/60 dark:hover:bg-slate-800/40 transition-colors">
+                            <td className="py-3.5 px-4 font-semibold text-slate-900 dark:text-slate-100 whitespace-nowrap">
+                              {trName}
+                            </td>
+                            <td className="py-3.5 px-4 text-slate-700 dark:text-slate-300 font-medium whitespace-nowrap text-xs sm:text-sm">
+                              {formatDate(s.scheduled_date)}
+                            </td>
+                            <td className="py-3.5 px-4 text-slate-700 dark:text-slate-300 whitespace-nowrap text-xs sm:text-sm">
+                              {s.trainer_name}
+                            </td>
+                            <td className="py-3.5 px-4 text-slate-600 dark:text-slate-400 text-xs whitespace-nowrap">
+                              {s.group_type === 'department'
+                                ? `Dept: ${deptName || '—'}`
+                                : s.group_type === 'all'
+                                ? 'All'
+                                : 'Selected Staff'}
+                            </td>
+                            <td className="py-3.5 px-4 whitespace-nowrap">
+                              <span className={`status-badge capitalize ${getStatusColor(s.status)}`}>
+                                {s.status}
+                              </span>
+                            </td>
+                            <td className="py-3.5 px-4 whitespace-nowrap text-right sm:text-left">
+                              <div className="flex items-center gap-1.5 sm:justify-start justify-end">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800"
+                                  onClick={() => openEdit(s)}
+                                  title="Edit Training Schedule"
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 text-xs text-primary hover:bg-primary/10 hidden md:inline-flex"
+                                  onClick={() => openEventDetails(s)}
+                                >
+                                  <Eye className="h-3.5 w-3.5 mr-1" /> View Roster
+                                </Button>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        {/* --- CALENDAR VIEW CONTENT --- */}
+        <TabsContent value="calendar" className="mt-0 space-y-5">
+          {/* Filter Pills & Month Statistics Banner */}
+          <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 px-4 py-3 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-xs">
+            {/* Status Filter Pills */}
+            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+              <button
+                onClick={() => setStatusFilter('all')}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all whitespace-nowrap ${
+                  statusFilter === 'all'
+                    ? 'bg-slate-900 text-white shadow-xs'
+                    : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200'
+                }`}
+              >
+                <span className="h-2 w-2 rounded-full bg-indigo-500" />
+                All Sessions
+              </button>
 
           <button
             onClick={() => setStatusFilter('planned')}
@@ -809,6 +979,8 @@ export default function SchedulesPage() {
           )}
         </div>
       </div>
+    </TabsContent>
+  </Tabs>
 
       {/* Roster & Quick Event Detail Dialog */}
       <Dialog open={eventDetailOpen} onOpenChange={setEventDetailOpen}>
